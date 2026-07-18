@@ -34,6 +34,7 @@ namespace Blackout
         private ConfigEntry<float> _delaySeconds;
         private ConfigEntry<float> _darknessStrength;
         private ConfigEntry<float> _flashlightGain;
+        private ConfigEntry<float> _emergencyDim;
         private ConfigEntry<float> _soundVolume;
         private ConfigEntry<SoundMethod> _soundMethod;
         private ConfigEntry<bool> _announcementEnabled;
@@ -99,7 +100,7 @@ namespace Blackout
             _delaySeconds = Config.Bind(
                 "2. Blackout",
                 "Delay",
-                5f,
+                15f,
                 new ConfigDescription(
                     "Seconds after you gain control before the power goes out",
                     new AcceptableValueRange<float>(0f, 120f)));
@@ -111,6 +112,14 @@ namespace Blackout
                 new ConfigDescription(
                     "1 = pitch black, lower values leave residual ambient light. Adjusts live",
                     new AcceptableValueRange<float>(0.1f, 1f)));
+
+            _emergencyDim = Config.Bind(
+                "2. Blackout",
+                "Emergency Power Dim",
+                0.3f,
+                new ConfigDescription(
+                    "Dimming from raid start before the full cut, like the live event's emergency power. 0 = normal lighting until the cut",
+                    new AcceptableValueRange<float>(0f, 0.8f)));
 
             _flashlightGain = Config.Bind(
                 "2. Blackout",
@@ -143,7 +152,7 @@ namespace Blackout
             _announcementDelay = Config.Bind(
                 "3. Sound",
                 "Announcement Delay",
-                8f,
+                2f,
                 new ConfigDescription(
                     "Seconds after the blackout before the intercom announcement plays",
                     new AcceptableValueRange<float>(0f, 60f)));
@@ -209,8 +218,8 @@ namespace Blackout
         {
             if (_testSoundKey.Value.IsDown())
             {
-                Logger.LogInfo($"[Blackout] Test sound via {_soundMethod.Value}");
-                PlayPowerDownSound();
+                Logger.LogInfo("[Blackout] Test announcement via intercom path");
+                PlayAnnouncement();
             }
 
             if (_knownClipKey.Value.IsDown())
@@ -242,6 +251,27 @@ namespace Blackout
             {
                 DumpLights();
             }
+        }
+
+        private static bool IsGearLight(Light light)
+        {
+            if (light.name.ToLowerInvariant().Contains("muzzle"))
+            {
+                return false;
+            }
+            // the flashlight controller marks every tactical device light, pooled or not
+            if (light.GetComponentInParent<TacticalComboVisualController>() != null)
+            {
+                return true;
+            }
+            for (var t = light.transform; t != null; t = t.parent)
+            {
+                if (t.name.StartsWith("nvg_") || t.name.StartsWith("flashlight_"))
+                {
+                    return true;
+                }
+            }
+            return light.GetComponentInParent<Player>() != null;
         }
 
         private void ApplyGearBoost()
@@ -351,7 +381,7 @@ namespace Blackout
                 {
                     _announcementPlayed = true;
                     Logger.LogInfo("[Blackout] Announcement fired");
-                    PlayClip(_announcerClip);
+                    PlayAnnouncement();
                     if (_subtitleEnabled.Value && !string.IsNullOrWhiteSpace(_subtitleTextCfg.Value))
                     {
                         _subtitleText = _subtitleTextCfg.Value;
@@ -377,11 +407,20 @@ namespace Blackout
                 }
                 _clockStarted = true;
                 _blackoutAt = Time.time + _delaySeconds.Value;
+                if (_emergencyDim.Value > 0f)
+                {
+                    CreatePpVolume();
+                    Logger.LogInfo($"[Blackout] Emergency power dim ({_emergencyDim.Value:0.00})");
+                }
                 return;
             }
 
             if (Time.time < _blackoutAt)
             {
+                if (_colorGrading != null)
+                {
+                    _colorGrading.postExposure.value = -7f * _emergencyDim.Value;
+                }
                 return;
             }
 
@@ -402,7 +441,10 @@ namespace Blackout
             _originalLightmaps = LightmapSettings.lightmaps;
             LightmapSettings.lightmaps = new LightmapData[0];
 
-            CreatePpVolume();
+            if (_ppVolume == null)
+            {
+                CreatePpVolume();
+            }
 
             _nextRescan = 0f;
             EnforceBlackout();
@@ -427,12 +469,9 @@ namespace Blackout
 
                     // player/bot gear lights (flashlights, lasers) get boosted instead of killed -
                     // they must punch through the exposure drop like they would on a real night raid
-                    if (light.GetComponentInParent<Player>() != null)
+                    if (IsGearLight(light))
                     {
-                        if (!light.name.ToLowerInvariant().Contains("muzzle"))
-                        {
-                            _gearLights[light] = new GearLightState { Baseline = light.intensity, LastSet = light.intensity };
-                        }
+                        _gearLights[light] = new GearLightState { Baseline = light.intensity, LastSet = light.intensity };
                         continue;
                     }
                     _killedLights.Add(new LightState { Light = light, Intensity = light.intensity });
@@ -448,17 +487,14 @@ namespace Blackout
                         _killedLights.RemoveAt(i);
                         continue;
                     }
-                    if (state.Light.GetComponentInParent<Player>() == null)
+                    if (!IsGearLight(state.Light))
                     {
                         continue;
                     }
                     _killedLights.RemoveAt(i);
                     state.Light.enabled = true;
                     state.Light.intensity = state.Intensity;
-                    if (!state.Light.name.ToLowerInvariant().Contains("muzzle"))
-                    {
-                        _gearLights[state.Light] = new GearLightState { Baseline = state.Intensity, LastSet = state.Intensity };
-                    }
+                    _gearLights[state.Light] = new GearLightState { Baseline = state.Intensity, LastSet = state.Intensity };
                 }
             }
 
@@ -568,23 +604,32 @@ namespace Blackout
 
             if (_subtitleBg == null)
             {
-                _subtitleBg = MakeTexture(new Color(0f, 0f, 0f, 0.8f));
-                _subtitleFrame = MakeTexture(new Color(0.85f, 0.85f, 0.85f, 0.9f));
+                _subtitleBg = MakeTexture(new Color(0f, 0f, 0f, 0.85f));
+                _subtitleFrame = MakeTexture(new Color(0.9f, 0.9f, 0.9f, 0.95f));
                 _subtitleStyle = new GUIStyle
                 {
                     richText = true,
                     wordWrap = true,
                     normal = { textColor = Color.white }
                 };
+                foreach (var font in Resources.FindObjectsOfTypeAll<Font>())
+                {
+                    if (font != null && font.name.ToLowerInvariant().Contains("bender"))
+                    {
+                        _subtitleStyle.font = font;
+                        break;
+                    }
+                }
+                Logger.LogInfo($"[Blackout] Subtitle font: {(_subtitleStyle.font != null ? _subtitleStyle.font.name : "default")}");
             }
 
-            _subtitleStyle.fontSize = Mathf.RoundToInt(Screen.height / 60f);
-            var pad = Mathf.RoundToInt(Screen.height / 108f);
-            var width = Screen.width * 0.34f;
+            _subtitleStyle.fontSize = Mathf.RoundToInt(Screen.height / 62f);
+            var pad = Mathf.RoundToInt(Screen.height / 160f);
+            var width = Screen.width * 0.42f;
             var content = new GUIContent("<b>Announcement System:</b> " + _subtitleText);
             var height = _subtitleStyle.CalcHeight(content, width - pad * 2f) + pad * 2f;
             var x = (Screen.width - width) / 2f;
-            var y = Screen.height * 0.78f - height;
+            var y = Screen.height * 0.85f - height;
 
             GUI.DrawTexture(new Rect(x - 2f, y - 2f, width + 4f, height + 4f), _subtitleFrame);
             GUI.DrawTexture(new Rect(x, y, width, height), _subtitleBg);
@@ -602,6 +647,39 @@ namespace Blackout
         private void PlayPowerDownSound()
         {
             PlayClip(_powerDownClip);
+        }
+
+        // same call chain the labs switch intercom uses (WorldInteractiveObject.PlaySoundAtPoint)
+        private void PlayAnnouncement()
+        {
+            if (_announcerClip == null || _soundVolume.Value <= 0f)
+            {
+                return;
+            }
+
+            var gameWorld = Singleton<GameWorld>.Instance;
+            var player = gameWorld != null ? gameWorld.MainPlayer : null;
+            if (player == null || !MonoBehaviourSingleton<BetterAudio>.Instantiated)
+            {
+                PlayClip(_announcerClip);
+                return;
+            }
+
+            var forward = Camera.main != null ? Camera.main.transform.forward : Vector3.forward;
+            forward.y = 0f;
+            forward = forward.sqrMagnitude > 0.01f ? forward.normalized : Vector3.forward;
+            var pos = player.Position + forward * 12f + Vector3.up * 3.5f;
+
+            MonoBehaviourSingleton<BetterAudio>.Instance.PlayAtPoint(
+                pos,
+                _announcerClip,
+                BetterAudio.AudioSourceGroupType.InteractiveObjects,
+                60,
+                _soundVolume.Value,
+                EOcclusionTest.None,
+                null,
+                true,
+                false);
         }
 
         private void PlayClip(AudioClip clip)
