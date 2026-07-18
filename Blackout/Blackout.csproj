@@ -21,6 +21,10 @@
       <HintPath>$(SPT_PATH)\EscapeFromTarkov_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Unity.Postprocessing.Runtime">
+      <HintPath>$(SPT_PATH)\EscapeFromTarkov_Data\Managed\Unity.Postprocessing.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.AudioModule">
       <HintPath>$(SPT_PATH)\EscapeFromTarkov_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
       <Private>false</Private>
