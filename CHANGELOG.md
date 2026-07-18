@@ -4,7 +4,8 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 ### Added
-- Labs goes dark seconds after the raid starts - scene lights killed plus an exposure drop to night-raid darkness, strength and delay configurable
-- The live event's real blackout sound and intercom announcement voice, shipped in an asset bundle
-- Announcement System text box during the intercom voice, text configurable
-- Flashlights and bot gear lights punch through the darkness (configurable gain)
+- Labs goes dark 15 seconds after you start moving - scene lights killed plus a fixed exposure drop, tuned round by round against live event footage
+- The live event's real blackout sound and intercom announcement voice, shipped in an asset bundle (runtime-loaded clips decode silent in this client)
+- Announcement plays through the map's own PA speaker objects at normalized pitch, with a virtual speaker array fallback for maps without them
+- Announcement System text box in the game's Bender font during the intercom voice, text configurable
+- Flashlights and gear lights protected from the light kill and compensated against the exposure drop

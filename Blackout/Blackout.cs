@@ -1,11 +1,14 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using Audio.SpatialSystem;
 using BepInEx;
 using BepInEx.Configuration;
 using Comfort.Common;
 using EFT;
+using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering.PostProcessing;
 
@@ -17,6 +20,8 @@ namespace Blackout
         private const string LabsLocationId = "laboratory";
 
         private const float RescanIntervalSec = 2f;
+        // matched against live event footage: near-black with faint silhouettes
+        private const float CutExposure = -2f;
 
         public enum SoundMethod
         {
@@ -32,9 +37,6 @@ namespace Blackout
         private ConfigEntry<bool> _modEnabled;
         private ConfigEntry<bool> _labsOnly;
         private ConfigEntry<float> _delaySeconds;
-        private ConfigEntry<float> _darknessStrength;
-        private ConfigEntry<float> _flashlightGain;
-        private ConfigEntry<float> _emergencyDim;
         private ConfigEntry<float> _soundVolume;
         private ConfigEntry<SoundMethod> _soundMethod;
         private ConfigEntry<bool> _announcementEnabled;
@@ -46,6 +48,11 @@ namespace Blackout
         private ConfigEntry<KeyboardShortcut> _knownClipKey;
 
         private bool _inRaid;
+        private bool _statusStarted;
+        private Vector3 _startPos;
+        private Vector2 _startLook;
+        private float _accumMove;
+        private float _accumLook;
         private bool _clockStarted;
         private bool _blackoutActive;
         private float _blackoutAt;
@@ -60,10 +67,18 @@ namespace Blackout
         private Texture2D _subtitleFrame;
         private GUIStyle _subtitleStyle;
         private bool _errorLogged;
+        private float _nextAudioScan;
+        private readonly HashSet<int> _scannedPlaying = new HashSet<int>();
 
         private readonly List<LightState> _killedLights = new List<LightState>();
         private readonly HashSet<Light> _trackedLights = new HashSet<Light>();
         private readonly Dictionary<Light, GearLightState> _gearLights = new Dictionary<Light, GearLightState>();
+
+        private class GearLightState
+        {
+            public float Baseline;
+            public float LastSet;
+        }
         private PostProcessVolume _ppVolume;
         private ColorGrading _colorGrading;
         private LightmapData[] _originalLightmaps;
@@ -77,14 +92,12 @@ namespace Blackout
             public float Intensity;
         }
 
-        private class GearLightState
-        {
-            public float Baseline;
-            public float LastSet;
-        }
+        internal static BepInEx.Logging.ManualLogSource Log;
 
         private void Awake()
         {
+            Log = Logger;
+            new Harmony("com.vultify.blackout").PatchAll(Assembly.GetExecutingAssembly());
             _modEnabled = Config.Bind(
                 "1. General",
                 "Enable Mod",
@@ -104,30 +117,6 @@ namespace Blackout
                 new ConfigDescription(
                     "Seconds after you gain control before the power goes out",
                     new AcceptableValueRange<float>(0f, 120f)));
-
-            _darknessStrength = Config.Bind(
-                "2. Blackout",
-                "Darkness Strength",
-                1f,
-                new ConfigDescription(
-                    "1 = pitch black, lower values leave residual ambient light. Adjusts live",
-                    new AcceptableValueRange<float>(0.1f, 1f)));
-
-            _emergencyDim = Config.Bind(
-                "2. Blackout",
-                "Emergency Power Dim",
-                0.3f,
-                new ConfigDescription(
-                    "Dimming from raid start before the full cut, like the live event's emergency power. 0 = normal lighting until the cut",
-                    new AcceptableValueRange<float>(0f, 0.8f)));
-
-            _flashlightGain = Config.Bind(
-                "2. Blackout",
-                "Flashlight Gain",
-                8f,
-                new ConfigDescription(
-                    "Extra brightness for player and bot gear lights on top of darkness compensation. 1 = same as a lit room",
-                    new AcceptableValueRange<float>(1f, 32f)));
 
             _soundVolume = Config.Bind(
                 "3. Sound",
@@ -193,24 +182,50 @@ namespace Blackout
             Application.onBeforeRender += OnBeforeRender;
         }
 
-        private void OnDestroy()
+        // catches announcements played by ANY system: dumps every new voice-length source that starts playing
+        private void ScanPlayingAudio()
         {
-            Application.onBeforeRender -= OnBeforeRender;
-        }
-
-        private void OnBeforeRender()
-        {
-            if (!_blackoutActive)
+            if (Time.time < _nextAudioScan)
             {
                 return;
             }
-            try
+            _nextAudioScan = Time.time + 0.5f;
+
+            var gw = Singleton<GameWorld>.Instance;
+            var playerPos = gw != null && gw.MainPlayer != null ? gw.MainPlayer.Position : Vector3.zero;
+            foreach (var s in FindObjectsOfType<AudioSource>())
             {
-                ApplyGearBoost();
-            }
-            catch
-            {
-                // Update's error path already reports; keep the render-phase hook quiet
+                if (s == null || !s.isPlaying || s.clip == null || s.clip.length < 2.5f || s.loop)
+                {
+                    continue;
+                }
+                var id = s.GetInstanceID();
+                if (!_scannedPlaying.Add(id))
+                {
+                    continue;
+                }
+                var path = s.gameObject.name;
+                var t = s.transform.parent;
+                for (var i = 0; i < 6 && t != null; i++, t = t.parent)
+                {
+                    path = t.name + "/" + path;
+                }
+                var mixer = s.outputAudioMixerGroup;
+                var dist = Vector3.Distance(s.transform.position, playerPos);
+                if (s.rolloffMode == AudioRolloffMode.Custom)
+                {
+                    var curve = s.GetCustomCurve(AudioSourceCurveType.CustomRolloff);
+                    if (curve != null)
+                    {
+                        var pts = "";
+                        foreach (var k in curve.keys)
+                        {
+                            pts += $"({k.time:0.000},{k.value:0.000}) ";
+                        }
+                        Log.LogInfo($"[Blackout SCAN] curve '{s.gameObject.name}': {pts}");
+                    }
+                }
+                Log.LogInfo($"[Blackout SCAN] playing clip='{s.clip.name}' len={s.clip.length:0.0}s vol={s.volume:0.00} blend={s.spatialBlend:0.00} spatialize={s.spatialize} min={s.minDistance:0.0} max={s.maxDistance:0.0} rolloffMode={s.rolloffMode} prio={s.priority} reverb={s.reverbZoneMix:0.00} spread={s.spread:0.0} bypassFx={s.bypassEffects}/{s.bypassListenerEffects}/{s.bypassReverbZones} mixer={(mixer != null ? mixer.audioMixer.name + "/" + mixer.name : "none")} dist={dist:0.0}m :: {path}");
             }
         }
 
@@ -253,6 +268,49 @@ namespace Blackout
             }
         }
 
+        private void OnDestroy()
+        {
+            Application.onBeforeRender -= OnBeforeRender;
+        }
+
+        private void OnBeforeRender()
+        {
+            if (!_blackoutActive)
+            {
+                return;
+            }
+            try
+            {
+                ApplyGearBoost();
+            }
+            catch
+            {
+                // Update's error path already reports; keep the render-phase hook quiet
+            }
+        }
+
+        private void ApplyGearBoost()
+        {
+            // rebase when the game changes intensity (toggles), then cancel the exposure drop exactly
+            var boost = Mathf.Pow(2f, -CutExposure) * 0.5f;
+            foreach (var pair in _gearLights)
+            {
+                var light = pair.Key;
+                var state = pair.Value;
+                if (light == null)
+                {
+                    continue;
+                }
+                var current = light.intensity;
+                if (Mathf.Abs(current - state.LastSet) > 0.001f)
+                {
+                    state.Baseline = current;
+                }
+                light.intensity = state.Baseline * boost;
+                state.LastSet = light.intensity;
+            }
+        }
+
         private static bool IsGearLight(Light light)
         {
             if (light.name.ToLowerInvariant().Contains("muzzle"))
@@ -274,29 +332,6 @@ namespace Blackout
             return light.GetComponentInParent<Player>() != null;
         }
 
-        private void ApplyGearBoost()
-        {
-            // if the game touched the intensity since we last set it (flashlight toggled),
-            // treat the new value as the real baseline instead of clamping to a stale one
-            var boost = Mathf.Pow(2f, 7f * _darknessStrength.Value) * _flashlightGain.Value;
-            foreach (var pair in _gearLights)
-            {
-                var light = pair.Key;
-                var state = pair.Value;
-                if (light == null)
-                {
-                    continue;
-                }
-                var current = light.intensity;
-                if (Mathf.Abs(current - state.LastSet) > 0.001f)
-                {
-                    state.Baseline = current;
-                }
-                light.intensity = state.Baseline * boost;
-                state.LastSet = light.intensity;
-            }
-        }
-
         private void DumpLights()
         {
             var all = FindObjectsOfType<Light>();
@@ -314,10 +349,8 @@ namespace Blackout
                     path = t.name + "/" + path;
                 }
                 var underPlayer = light.GetComponentInParent<Player>() != null;
-                var gearInfo = _gearLights.TryGetValue(light, out var gs)
-                    ? $"gear baseline={gs.Baseline:0.##} lastSet={gs.LastSet:0.##}"
-                    : "notGear";
-                Logger.LogInfo($"[Blackout]   ENABLED {light.type} intensity={light.intensity:0.##} range={light.range:0.#} underPlayer={underPlayer} {gearInfo} :: {path}");
+                var gear = _gearLights.ContainsKey(light) ? "gear" : "notGear";
+                Logger.LogInfo($"[Blackout]   ENABLED {light.type} intensity={light.intensity:0.##} range={light.range:0.#} underPlayer={underPlayer} {gear} :: {path}");
             }
             Logger.LogInfo("[Blackout] === END LIGHT DUMP ===");
         }
@@ -350,6 +383,7 @@ namespace Blackout
                 {
                     // raid ended; the scene (and everything we touched) is gone
                     _inRaid = false;
+                    _statusStarted = false;
                     _clockStarted = false;
                     _blackoutActive = false;
                     _killedLights.Clear();
@@ -363,6 +397,8 @@ namespace Blackout
             }
 
             _inRaid = true;
+
+            ScanPlayingAudio();
 
             if (!_modEnabled.Value)
             {
@@ -396,8 +432,8 @@ namespace Blackout
                 return;
             }
 
-            // don't start the clock until the player is actually in control -
-            // MainPlayer exists long before the countdown ends
+            // Started flips when the raid clock starts, still during the countdown -
+            // real control is only proven by the player moving or looking around
             if (!_clockStarted)
             {
                 var game = Singleton<AbstractGame>.Instance;
@@ -405,22 +441,38 @@ namespace Blackout
                 {
                     return;
                 }
+                var player = gameWorld.MainPlayer;
+                if (!_statusStarted)
+                {
+                    _statusStarted = true;
+                    _startPos = player.Position;
+                    _startLook = player.Rotation;
+                    _accumMove = 0f;
+                    _accumLook = 0f;
+                    return;
+                }
+                var moveDelta = (player.Position - _startPos).magnitude;
+                var lookDelta = (player.Rotation - _startLook).magnitude;
+                _startPos = player.Position;
+                _startLook = player.Rotation;
+                if (moveDelta < 2f)
+                {
+                    // per-frame walking accumulates, spawn snaps and teleports do not
+                    _accumMove += moveDelta;
+                }
+                _accumLook += lookDelta;
+                if (_accumMove < 1.5f && _accumLook < 60f)
+                {
+                    return;
+                }
+                Logger.LogInfo($"[Blackout] Control detected (moved {_accumMove:0.0}m, looked {_accumLook:0} deg) at t={Time.time:0.0}");
                 _clockStarted = true;
                 _blackoutAt = Time.time + _delaySeconds.Value;
-                if (_emergencyDim.Value > 0f)
-                {
-                    CreatePpVolume();
-                    Logger.LogInfo($"[Blackout] Emergency power dim ({_emergencyDim.Value:0.00})");
-                }
                 return;
             }
 
             if (Time.time < _blackoutAt)
             {
-                if (_colorGrading != null)
-                {
-                    _colorGrading.postExposure.value = -7f * _emergencyDim.Value;
-                }
                 return;
             }
 
@@ -506,19 +558,18 @@ namespace Blackout
                 }
             }
 
+
             ApplyGearBoost();
 
-            // live so the F12 slider is directly visible in-scene
-            var residual = 1f - _darknessStrength.Value;
-            RenderSettings.ambientIntensity = _originalAmbientIntensity * residual;
-            RenderSettings.ambientLight = _originalAmbientLight * residual;
-            RenderSettings.reflectionIntensity = _originalReflectionIntensity * residual;
+            RenderSettings.ambientIntensity = 0f;
+            RenderSettings.ambientLight = Color.black;
+            RenderSettings.reflectionIntensity = 0f;
 
             // EFT's shaders light Labs through their own channels, so image-space exposure
             // is the only lever guaranteed to reach night-raid darkness
             if (_colorGrading != null)
             {
-                _colorGrading.postExposure.value = -7f * _darknessStrength.Value;
+                _colorGrading.postExposure.value = CutExposure;
             }
         }
 
@@ -544,7 +595,7 @@ namespace Blackout
 
             _colorGrading = ScriptableObject.CreateInstance<ColorGrading>();
             _colorGrading.enabled.Override(true);
-            _colorGrading.postExposure.Override(-7f * _darknessStrength.Value);
+            _colorGrading.postExposure.Override(CutExposure);
             _ppVolume = PostProcessManager.instance.QuickVolume(layerIndex, 1000f, _colorGrading);
         }
 
@@ -569,13 +620,6 @@ namespace Blackout
                 {
                     state.Light.enabled = true;
                     state.Light.intensity = state.Intensity;
-                }
-            }
-            foreach (var pair in _gearLights)
-            {
-                if (pair.Key != null)
-                {
-                    pair.Key.intensity = pair.Value.Baseline;
                 }
             }
             _killedLights.Clear();
@@ -665,21 +709,92 @@ namespace Blackout
                 return;
             }
 
-            var forward = Camera.main != null ? Camera.main.transform.forward : Vector3.forward;
-            forward.y = 0f;
-            forward = forward.sqrMagnitude > 0.01f ? forward.normalized : Vector3.forward;
-            var pos = player.Position + forward * 12f + Vector3.up * 3.5f;
+            // best case: the map has real PA speakers, play through THEM - identical by definition
+            // (their reverb/EQ companion sources can't be replicated on a raw AudioSource)
+            var speakers = new List<AudioSource>();
+            foreach (var s in FindObjectsOfType<AudioSource>())
+            {
+                if (s != null && s.gameObject.name.StartsWith("sound_disclamer"))
+                {
+                    speakers.Add(s);
+                }
+            }
+            if (speakers.Count > 0)
+            {
+                Logger.LogInfo($"[Blackout] Announcement via {speakers.Count} map announcer speakers");
+                foreach (var s in speakers)
+                {
+                    StartCoroutine(PlayThroughSpeaker(s));
+                }
+                return;
+            }
 
-            MonoBehaviourSingleton<BetterAudio>.Instance.PlayAtPoint(
-                pos,
-                _announcerClip,
-                BetterAudio.AudioSourceGroupType.InteractiveObjects,
-                60,
-                _soundVolume.Value,
-                EOcclusionTest.None,
-                null,
-                true,
-                false);
+            UnityEngine.Audio.AudioMixerGroup group = null;
+            foreach (var g in Resources.FindObjectsOfTypeAll<UnityEngine.Audio.AudioMixerGroup>())
+            {
+                if (g != null && g.name == "CommonAmbInEffects")
+                {
+                    group = g;
+                    break;
+                }
+            }
+            if (group == null)
+            {
+                foreach (var s in FindObjectsOfType<AudioSource>())
+                {
+                    if (s != null && s.enabled && s.outputAudioMixerGroup != null)
+                    {
+                        group = s.outputAudioMixerGroup;
+                        if (s.isPlaying)
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            var offsets = new[]
+            {
+                new Vector3(40f, 4f, 12f),
+                new Vector3(-68f, 4f, -20f),
+                new Vector3(25f, 4f, -75f),
+                new Vector3(-30f, 4f, 95f)
+            };
+            foreach (var offset in offsets)
+            {
+                var go = new GameObject("BlackoutPaSpeaker");
+                go.transform.position = player.Position + offset;
+                var speaker = go.AddComponent<AudioSource>();
+                speaker.clip = _announcerClip;
+                speaker.outputAudioMixerGroup = group;
+                speaker.spatialBlend = 1f;
+                speaker.spread = 120f;
+                speaker.priority = 64;
+                speaker.minDistance = 15f;
+                speaker.maxDistance = 80f;
+                speaker.rolloffMode = AudioRolloffMode.Linear;
+                speaker.volume = 0.58f * _soundVolume.Value;
+                speaker.Play();
+                Destroy(go, _announcerClip.length + 1f);
+            }
+        }
+
+        private IEnumerator PlayThroughSpeaker(AudioSource speaker)
+        {
+            var originalClip = speaker.clip;
+            var originalPitch = speaker.pitch;
+            Log.LogInfo($"[Blackout] Speaker '{speaker.gameObject.name}' original pitch {originalPitch:0.000}, playing at 1.0");
+            speaker.Stop();
+            speaker.clip = _announcerClip;
+            speaker.pitch = 1f;
+            speaker.Play();
+            yield return new WaitForSeconds(_announcerClip.length + 0.1f);
+            if (speaker != null)
+            {
+                speaker.Stop();
+                speaker.clip = originalClip;
+                speaker.pitch = originalPitch;
+            }
         }
 
         private void PlayClip(AudioClip clip)
@@ -814,6 +929,45 @@ namespace Blackout
             _powerDownClip = bundle.LoadAsset<AudioClip>("black_out_huge");
             _announcerClip = bundle.LoadAsset<AudioClip>("announcer_lights_out_01");
             Logger.LogInfo($"[Blackout] Bundle loaded: blackout sfx {(_powerDownClip != null ? _powerDownClip.length.ToString("0.0") + "s" : "MISSING")}, announcer {(_announcerClip != null ? _announcerClip.length.ToString("0.0") + "s" : "MISSING")}");
+        }
+    }
+
+    [HarmonyPatch(typeof(BetterAudio), nameof(BetterAudio.PlayAtPoint),
+        typeof(Vector3), typeof(AudioClip), typeof(BetterAudio.AudioSourceGroupType), typeof(int),
+        typeof(float), typeof(EOcclusionTest), typeof(UnityEngine.Audio.AudioMixerGroup),
+        typeof(bool), typeof(bool), typeof(bool), typeof(bool))]
+    internal static class PlayAtPointSpy
+    {
+        private static void Postfix(BetterSource __result, Vector3 position, AudioClip clip,
+            BetterAudio.AudioSourceGroupType sourceGroup, int rolloff, float volume, bool spatialize)
+        {
+            try
+            {
+                if (clip == null || clip.length < 1.5f)
+                {
+                    return; // door creaks and footsteps are noise, voice-length clips only
+                }
+                var log = BlackoutPlugin.Log;
+                var gw = Singleton<GameWorld>.Instance;
+                var dist = gw != null && gw.MainPlayer != null ? Vector3.Distance(position, gw.MainPlayer.Position) : -1f;
+                log.LogInfo($"[Blackout SPY] PlayAtPoint clip='{clip.name}' len={clip.length:0.0}s ch={clip.channels} group={sourceGroup} rolloff={rolloff} vol={volume:0.00} spatialize={spatialize} distToPlayer={dist:0.0}m pos={position}");
+                if (__result == null)
+                {
+                    log.LogInfo("[Blackout SPY]   result: null BetterSource");
+                    return;
+                }
+                foreach (var s in __result.GetComponentsInChildren<AudioSource>(true))
+                {
+                    var mixer = s.outputAudioMixerGroup;
+                    var curve = s.GetCustomCurve(AudioSourceCurveType.CustomRolloff);
+                    var curveInfo = curve != null ? curve.length.ToString() : "none";
+                    log.LogInfo($"[Blackout SPY]   src '{s.gameObject.name}': vol={s.volume:0.00} pitch={s.pitch:0.00} blend={s.spatialBlend:0.00} spatialize={s.spatialize} spatializePost={s.spatializePostEffects} min={s.minDistance:0.0} max={s.maxDistance:0.0} rolloffMode={s.rolloffMode} curveKeys={curveInfo} prio={s.priority} reverb={s.reverbZoneMix:0.00} doppler={s.dopplerLevel:0.00} spread={s.spread:0.0} bypassFx={s.bypassEffects}/{s.bypassListenerEffects}/{s.bypassReverbZones} mixer={(mixer != null ? mixer.audioMixer.name + "/" + mixer.name : "none")}");
+                }
+            }
+            catch (Exception ex)
+            {
+                BlackoutPlugin.Log.LogWarning($"[Blackout SPY] {ex.Message}");
+            }
         }
     }
 }
