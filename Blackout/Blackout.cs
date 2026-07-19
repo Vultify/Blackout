@@ -42,6 +42,9 @@ namespace Blackout
 
         private bool _inRaid;
         private bool _doorsLocked;
+        private bool _exfilsDumped;
+        private bool _lockdownApplied;
+        private bool _exfilRowsHidden;
         private bool _statusStarted;
         private Vector3 _startPos;
         private Vector2 _startLook;
@@ -211,6 +214,9 @@ namespace Blackout
                     // raid ended; the scene (and everything we touched) is gone
                     _inRaid = false;
                     _doorsLocked = false;
+                    _exfilsDumped = false;
+                    _lockdownApplied = false;
+                    _exfilRowsHidden = false;
                     _statusStarted = false;
                     _clockStarted = false;
                     _blackoutActive = false;
@@ -232,6 +238,23 @@ namespace Blackout
             {
                 _doorsLocked = true;
                 LockEventDoors();
+            }
+
+            // exfil points initialize later in the load than doors do - poll until they exist
+            if (!_exfilsDumped && _modEnabled.Value
+                && (!_labsOnly.Value || gameWorld.LocationId == LabsLocationId))
+            {
+                _exfilsDumped = DumpExfils();
+            }
+
+            if (!_lockdownApplied && _modEnabled.Value && gameWorld.LocationId == LabsLocationId)
+            {
+                _lockdownApplied = ApplyExtractLockdown();
+            }
+
+            if (_lockdownApplied && !_exfilRowsHidden)
+            {
+                _exfilRowsHidden = HideDisabledExfilRows();
             }
 
             if (_inspectDoorKey.Value.IsDown())
@@ -742,6 +765,121 @@ namespace Blackout
             Logger.LogInfo($"[Blackout] Locked {locked}/{wanted.Count} event doors");
         }
 
+        // recon for the extraction lockdown: names, statuses and switch wiring of every exfil
+        private bool DumpExfils()
+        {
+            var controller = ExfiltrationControllerClass.Instance;
+            if (controller == null || controller.ExfiltrationPoints == null
+                || controller.ExfiltrationPoints.Length == 0)
+            {
+                return false;
+            }
+            foreach (var point in controller.ExfiltrationPoints)
+            {
+                if (point == null)
+                {
+                    continue;
+                }
+                try
+                {
+                    var name = point.Settings != null ? point.Settings.Name : "<no settings>";
+                    var sw = point.Switch;
+                    var swInfo = sw != null ? $"switch='{sw.Id}' prev='{(sw.PreviousSwitch != null ? sw.PreviousSwitch.Id : "none")}'" : "no switch";
+                    Logger.LogInfo($"[Blackout EXFIL] '{name}' status={point.Status} {swInfo} pos={point.transform.position}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogInfo($"[Blackout EXFIL] point dump failed: {ex.Message}");
+                }
+            }
+            return true;
+        }
+
+        // the event's lockdown: only the two gates remain, dead consoles, admin switch to come
+        private bool ApplyExtractLockdown()
+        {
+            var controller = ExfiltrationControllerClass.Instance;
+            if (controller == null || controller.ExfiltrationPoints == null
+                || controller.ExfiltrationPoints.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (var point in controller.ExfiltrationPoints)
+            {
+                if (point == null || point.Settings == null)
+                {
+                    continue;
+                }
+                var name = point.Settings.Name;
+                if (name == "lab_Parking_Gate" || name == "lab_Hangar_Gate")
+                {
+                    if (point.Status == EFT.Interactive.EExfiltrationStatus.NotPresent)
+                    {
+                        point.Status = EFT.Interactive.EExfiltrationStatus.UncompleteRequirements;
+                    }
+                    // consoles are dead during the blackout, activation comes from the admin office
+                    if (point.Switch != null)
+                    {
+                        point.Switch.Operatable = false;
+                    }
+                }
+                else
+                {
+                    point.Status = EFT.Interactive.EExfiltrationStatus.NotPresent;
+                    // drop it from the extract list entirely and kill its whole switch chain
+                    point.EligibleEntryPoints = Array.Empty<string>();
+                    for (var sw = point.Switch; sw != null; sw = sw.PreviousSwitch)
+                    {
+                        sw.Operatable = false;
+                    }
+                }
+            }
+            Logger.LogInfo("[Blackout] Extract lockdown applied: gates only, consoles disabled");
+            return true;
+        }
+
+        // the timers panel lists every point regardless of status; hide the disabled rows
+        // the same way the game hides secret extracts
+        private bool HideDisabledExfilRows()
+        {
+            var panel = FindObjectOfType<EFT.UI.ExtractionTimersPanel>();
+            if (panel == null)
+            {
+                return false;
+            }
+
+            System.Collections.Generic.Dictionary<string, EFT.UI.BattleTimer.ExitTimerPanel> rows = null;
+            foreach (var field in typeof(EFT.UI.ExtractionTimersPanel).GetFields(BindingFlags.NonPublic | BindingFlags.Instance))
+            {
+                rows = field.GetValue(panel) as System.Collections.Generic.Dictionary<string, EFT.UI.BattleTimer.ExitTimerPanel>;
+                if (rows != null)
+                {
+                    break;
+                }
+            }
+            if (rows == null || rows.Count == 0)
+            {
+                return false;
+            }
+
+            var hidden = 0;
+            foreach (var pair in rows)
+            {
+                if (pair.Key == "lab_Parking_Gate" || pair.Key == "lab_Hangar_Gate")
+                {
+                    continue;
+                }
+                if (pair.Value != null)
+                {
+                    pair.Value.HideGameObject();
+                    hidden++;
+                }
+            }
+            Logger.LogInfo($"[Blackout] Hid {hidden} disabled extract rows");
+            return true;
+        }
+
         private void InspectAimedDoor()
         {
             var cam = Camera.main;
@@ -763,7 +901,17 @@ namespace Blackout
             }
             if (wio == null)
             {
-                Logger.LogInfo($"[Blackout DOOR] no interactive object within 8m ({hits.Length} hits, nearest '{(hits.Length > 0 ? hits[0].collider.name : "none")}')");
+                foreach (var h in hits)
+                {
+                    // skip bodies, we want static geometry for switch placement
+                    if (h.collider.GetComponentInParent<Player>() != null)
+                    {
+                        continue;
+                    }
+                    Logger.LogInfo($"[Blackout DOOR] surface point={h.point} normal={h.normal} on '{h.collider.name}' (for switch placement)");
+                    return;
+                }
+                Logger.LogInfo("[Blackout DOOR] nothing static within 8m");
                 return;
             }
             var path = wio.gameObject.name;
