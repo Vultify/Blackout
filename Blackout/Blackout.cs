@@ -37,6 +37,8 @@ namespace Blackout
         private ConfigEntry<bool> _modEnabled;
         private ConfigEntry<bool> _labsOnly;
         private ConfigEntry<float> _delaySeconds;
+        private ConfigEntry<float> _ambientLevel;
+        private ConfigEntry<float> _emergencyIntensity;
         private ConfigEntry<float> _soundVolume;
         private ConfigEntry<float> _ambienceVolume;
         private ConfigEntry<bool> _announcementEnabled;
@@ -107,6 +109,20 @@ namespace Blackout
         private int _stableSweeps;
         private int _stableLightScans;
         private readonly HashSet<Light> _reportedRelights = new HashSet<Light>();
+        private bool _isLabs;
+        private readonly List<Light> _emergencyLights = new List<Light>();
+
+        private bool _ambientKilled;
+        private Color _origAmbSky;
+        private Color _origAmbEquator;
+        private Color _origAmbGround;
+        private float _origAmbIntensity;
+        private Color _origNvSky;
+        private Color _origNvEquator;
+        private Color _origNvGround;
+        private float _origNvIntensity;
+        private AmbientLight[] _ambientLights;
+
 
         private void Awake()
         {
@@ -129,6 +145,22 @@ namespace Blackout
                 new ConfigDescription(
                     "Seconds after you gain control before the power goes out",
                     new AcceptableValueRange<float>(0f, 120f)));
+
+            _ambientLevel = Config.Bind(
+                "2. Blackout",
+                "Ambient Level",
+                0f,
+                new ConfigDescription(
+                    "Fraction of the map's normal ambient light kept during the blackout. 0 is live-event black, small values bring back a hint of visibility. Applies live",
+                    new AcceptableValueRange<float>(0f, 1f)));
+
+            _emergencyIntensity = Config.Bind(
+                "2. Blackout",
+                "Emergency Lights",
+                1.2f,
+                new ConfigDescription(
+                    "Brightness of the live event's amber emergency floods (Labs only, spawned at the real event positions). 0 switches them off. Applies live",
+                    new AcceptableValueRange<float>(0f, 3f)));
 
             _soundVolume = Config.Bind(
                 "3. Sound",
@@ -227,6 +259,8 @@ namespace Blackout
                     // materials are assets that outlive the raid - un-dim them or the next
                     // raid (any map) inherits dead lamps
                     RestoreEmissiveMaterials();
+                    RestoreAmbient();
+                    DestroyEmergencyLights();
                     _originalLightmaps = null;
                     _subtitleText = null;
                     _ambienceSource = null;
@@ -364,11 +398,161 @@ namespace Blackout
             _nextRescan = 0f;
             _stableSweeps = 0;
             _stableLightScans = 0;
+            _isLabs = Singleton<GameWorld>.Instance?.LocationId == LabsLocationId;
             DisableLightScene();
+            SpawnEmergencyLights();
             EnforceBlackout();
             PlayPowerDownSound();
             StartAmbience();
             Logger.LogInfo($"[Blackout] Power cut: {_killedLights.Count} lights killed, {_switchedLamps.Count} lamp fixtures switched off, {_dimmedEmissives.Count} emissive materials dimmed");
+        }
+
+        private struct EmergencyLight
+        {
+            public Vector3 Pos;
+            public Quaternion Rot;
+            public Color Col;
+            public float Range;
+            public float SpotAngle;
+            public bool Spot;
+
+            public EmergencyLight(Vector3 pos, Quaternion rot, Color col, float range, float spotAngle, bool spot)
+            {
+                Pos = pos; Rot = rot; Col = col; Range = range; SpotAngle = spotAngle; Spot = spot;
+            }
+        }
+
+        // the live dark scene's 15 amber emergency floods (5 fixtures x 3 lights), poses/colors/
+        // ranges read from archived level711. Baked intensity is 0 - live animates it at runtime,
+        // so ours rides the config slider instead
+        private static readonly EmergencyLight[] EmergencyLights =
+        {
+            new EmergencyLight(new Vector3(-226.1066f, 4.6192f, -426.5847f), new Quaternion(-0.765146f, 0.037084f, -0.031117f, 0.642034f), new Color(0.7426f, 0.4763f, 0f), 10f, 45f, true),
+            new EmergencyLight(new Vector3(-175.777f, 5.318f, -249.235f), new Quaternion(0.642034f, 0.031117f, 0.037084f, 0.765146f), new Color(0.7426f, 0.4763f, 0f), 10f, 45f, true),
+            new EmergencyLight(new Vector3(-129.822f, -4.3899f, -244.9065f), new Quaternion(-0.031117f, 0.642034f, 0.765146f, -0.037084f), new Color(0.7426f, 0.4763f, 0f), 10f, 45f, true),
+            new EmergencyLight(new Vector3(-165.6067f, 5.3204f, -249.235f), new Quaternion(0.536959f, 0.353343f, 0.421098f, 0.639922f), new Color(0.7426f, 0.4763f, 0f), 10f, 45f, true),
+            new EmergencyLight(new Vector3(-237.0126f, 4.6047f, -426.5867f), new Quaternion(-0.642199f, 0.417618f, -0.350423f, 0.538869f), new Color(0.7426f, 0.4763f, 0f), 10f, 45f, true),
+            new EmergencyLight(new Vector3(-165.6067f, 5.3204f, -249.235f), new Quaternion(-0.536959f, -0.353343f, 0.421098f, 0.639922f), new Color(0.7412f, 0.4745f, 0f), 5f, 30f, false),
+            new EmergencyLight(new Vector3(-237.0126f, 4.6047f, -426.5867f), new Quaternion(-0.642198f, 0.417618f, 0.350424f, -0.538869f), new Color(0.7412f, 0.4745f, 0f), 5f, 30f, false),
+            new EmergencyLight(new Vector3(-226.1066f, 4.6192f, -426.5847f), new Quaternion(-0.765146f, 0.037084f, 0.031117f, -0.642034f), new Color(0.7412f, 0.4745f, 0f), 5f, 30f, false),
+            new EmergencyLight(new Vector3(-175.777f, 5.318f, -249.235f), new Quaternion(-0.642034f, -0.031117f, 0.037084f, 0.765146f), new Color(0.7412f, 0.4745f, 0f), 5f, 30f, false),
+            new EmergencyLight(new Vector3(-129.822f, -4.3899f, -244.9065f), new Quaternion(0.031117f, -0.642034f, 0.765146f, -0.037084f), new Color(0.7412f, 0.4745f, 0f), 5f, 30f, false),
+            new EmergencyLight(new Vector3(-129.822f, -4.3899f, -244.9065f), new Quaternion(0.031117f, -0.642034f, 0.765146f, -0.037084f), new Color(0.7426f, 0.4763f, 0f), 10f, 45f, true),
+            new EmergencyLight(new Vector3(-175.777f, 5.318f, -249.235f), new Quaternion(-0.642034f, -0.031117f, 0.037084f, 0.765146f), new Color(0.7426f, 0.4763f, 0f), 10f, 45f, true),
+            new EmergencyLight(new Vector3(-226.1066f, 4.6192f, -426.5847f), new Quaternion(-0.765146f, 0.037084f, 0.031117f, -0.642034f), new Color(0.7426f, 0.4763f, 0f), 10f, 45f, true),
+            new EmergencyLight(new Vector3(-237.0126f, 4.6047f, -426.5867f), new Quaternion(-0.642198f, 0.417618f, 0.350424f, -0.538869f), new Color(0.7426f, 0.4763f, 0f), 10f, 45f, true),
+            new EmergencyLight(new Vector3(-165.6067f, 5.3204f, -249.235f), new Quaternion(-0.536959f, -0.353343f, 0.421098f, 0.639922f), new Color(0.7426f, 0.4763f, 0f), 10f, 45f, true),
+        };
+
+        private void SpawnEmergencyLights()
+        {
+            // the poses are Labs world coordinates - meaningless anywhere else
+            if (!_isLabs)
+            {
+                return;
+            }
+            foreach (var spec in EmergencyLights)
+            {
+                var go = new GameObject("blackout_emergency");
+                go.transform.SetPositionAndRotation(spec.Pos, spec.Rot);
+                var light = go.AddComponent<Light>();
+                light.type = spec.Spot ? LightType.Spot : LightType.Point;
+                light.color = spec.Col;
+                light.range = spec.Range;
+                light.spotAngle = spec.SpotAngle;
+                light.shadows = LightShadows.None;
+                light.intensity = _emergencyIntensity.Value;
+                _emergencyLights.Add(light);
+            }
+            Logger.LogInfo($"[Blackout] {_emergencyLights.Count} emergency lights spawned (live level711 poses)");
+        }
+
+        private void DestroyEmergencyLights()
+        {
+            foreach (var light in _emergencyLights)
+            {
+                if (light != null)
+                {
+                    Destroy(light.gameObject);
+                }
+            }
+            _emergencyLights.Clear();
+        }
+
+        // EFT ambient is its own pipeline, not RenderSettings: LevelSettings re-applies its
+        // serialized ambient colors on Camera.onPreCull every frame (zeroing RenderSettings
+        // loses that race), and AmbientLight pushes probe SH + _EFT_Ambient shader globals.
+        // Rewriting the fields LevelSettings enforces turns the game's own per-frame
+        // re-apply into the blackout's enforcer; the SH push is re-zeroed per frame
+        private void KillAmbient()
+        {
+            var settings = Singleton<LevelSettings>.Instance;
+            if (settings != null)
+            {
+                if (!_ambientKilled)
+                {
+                    _origAmbSky = settings.SkyColor;
+                    _origAmbEquator = settings.EquatorColor;
+                    _origAmbGround = settings.GroundColor;
+                    _origAmbIntensity = settings.AmbientIntensity;
+                    _origNvSky = settings.NightVisionSkyColor;
+                    _origNvEquator = settings.NightVisionEquatorColor;
+                    _origNvGround = settings.NightVisionGroundColor;
+                    _origNvIntensity = settings.NightVisionAmbientIntensity;
+                    _ambientKilled = true;
+                    Logger.LogInfo($"[Blackout] LevelSettings ambient taken over (level {_ambientLevel.Value:0.00})");
+                }
+
+                // scaled from the saved originals every frame - the F12 slider applies live
+                var keep = _ambientLevel.Value;
+                settings.SkyColor = _origAmbSky * keep;
+                settings.EquatorColor = _origAmbEquator * keep;
+                settings.GroundColor = _origAmbGround * keep;
+                settings.AmbientIntensity = _origAmbIntensity * keep;
+                settings.NightVisionSkyColor = _origNvSky * keep;
+                settings.NightVisionEquatorColor = _origNvEquator * keep;
+                settings.NightVisionGroundColor = _origNvGround * keep;
+                settings.NightVisionAmbientIntensity = _origNvIntensity * keep;
+            }
+
+            if (_ambientLights == null)
+            {
+                _ambientLights = FindObjectsOfType<AmbientLight>();
+                Logger.LogInfo($"[Blackout] AmbientLight components found: {_ambientLights.Length}");
+            }
+            foreach (var ambient in _ambientLights)
+            {
+                if (ambient == null)
+                {
+                    continue;
+                }
+                ambient.SetSH(default(UnityEngine.Rendering.SphericalHarmonicsL2));
+                ambient.SetReflectionIntensity(0f);
+            }
+        }
+
+        private void RestoreAmbient()
+        {
+            _ambientLights = null;
+            if (!_ambientKilled)
+            {
+                return;
+            }
+            _ambientKilled = false;
+            var settings = Singleton<LevelSettings>.Instance;
+            if (settings == null)
+            {
+                return;
+            }
+            settings.SkyColor = _origAmbSky;
+            settings.EquatorColor = _origAmbEquator;
+            settings.GroundColor = _origAmbGround;
+            settings.AmbientIntensity = _origAmbIntensity;
+            settings.NightVisionSkyColor = _origNvSky;
+            settings.NightVisionEquatorColor = _origNvEquator;
+            settings.NightVisionGroundColor = _origNvGround;
+            settings.NightVisionAmbientIntensity = _origNvIntensity;
+            settings.ApplySettings();
         }
 
         // the live event's dark preset simply doesn't load the map's *_LIGHT scene - it holds
@@ -397,6 +581,17 @@ namespace Blackout
 
         private void EnforceBlackout()
         {
+            KillAmbient();
+
+            // the F12 slider applies live; 0 switches them off without despawning
+            foreach (var emergency in _emergencyLights)
+            {
+                if (emergency != null && emergency.intensity != _emergencyIntensity.Value)
+                {
+                    emergency.intensity = _emergencyIntensity.Value;
+                }
+            }
+
             // scene scans are pricey, discover new lights on an interval,
             // but re-assert state on already-tracked ones every frame (ToD re-enables the sun)
             if (Time.time >= _nextRescan)
@@ -416,7 +611,18 @@ namespace Blackout
                         // LEDs are the one thing the live dark scene keeps lit
                         var lightName = light.name.ToLowerInvariant();
                         if (lightName.Contains("muzzle") || lightName.Contains("lightofpool")
-                            || lightName.Contains("red_light"))
+                            || lightName.Contains("red_light") || lightName.Contains("blackout_emergency"))
+                        {
+                            continue;
+                        }
+
+                        // Labs door-status LEDs (flicker rigs, keycard state lamps) - the live
+                        // dark scene ships all of these enabled and script-driven, so the game
+                        // keeps animating them like the event does. Labs-gated: elsewhere these
+                        // name fragments could match real lamps
+                        if (_isLabs && (lightName.Contains("wrong_flicker") || lightName.Contains("cantescape")
+                            || lightName.Contains("everything") || lightName.Contains("interacting")
+                            || lightName.Contains("ready") || lightName.Contains("wait")))
                         {
                             continue;
                         }
@@ -677,6 +883,8 @@ namespace Blackout
             RenderSettings.ambientLight = _originalAmbientLight;
             RenderSettings.reflectionIntensity = _originalReflectionIntensity;
             RestoreEmissiveMaterials();
+            RestoreAmbient();
+            DestroyEmergencyLights();
             StopAmbience();
 
             Logger.LogInfo("[Blackout] Power restored (mod disabled mid-raid)");
