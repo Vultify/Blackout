@@ -9,7 +9,6 @@ using Comfort.Common;
 using EFT;
 using UnityEngine;
 using UnityEngine.Audio;
-using UnityEngine.Rendering.PostProcessing;
 
 namespace Blackout
 {
@@ -19,8 +18,6 @@ namespace Blackout
         private const string LabsLocationId = "laboratory";
 
         private const float RescanIntervalSec = 2f;
-        // tuned by eye against live event footage
-        private const float CutExposure = -2f;
 
         // the live Admin's key id, created server-side by BlackoutServer
         private const string BlackoutKeyTemplateId = "6a33c17933cff6b88c08902e";
@@ -79,10 +76,10 @@ namespace Blackout
 
         private readonly List<LightState> _killedLights = new List<LightState>();
         private readonly HashSet<Light> _trackedLights = new HashSet<Light>();
-        private readonly Dictionary<Light, GearLightState> _gearLights = new Dictionary<Light, GearLightState>();
+        private readonly List<EFT.Interactive.LampController> _switchedLamps = new List<EFT.Interactive.LampController>();
+        private readonly HashSet<EFT.Interactive.LampController> _trackedLamps = new HashSet<EFT.Interactive.LampController>();
+        private readonly List<GameObject> _disabledLightSceneRoots = new List<GameObject>();
 
-        private PostProcessVolume _ppVolume;
-        private ColorGrading _colorGrading;
         private LightmapData[] _originalLightmaps;
         private float _originalAmbientIntensity;
         private Color _originalAmbientLight;
@@ -94,11 +91,19 @@ namespace Blackout
             public float Intensity;
         }
 
-        private class GearLightState
+        // the p0 emissive shaders drive brightness through power/visibility floats and the
+        // animated color pair - _EmissionColor alone is often already black
+        private static readonly string[] EmissiveFloatProps = { "_EmissionPower", "_EmissionVisibility" };
+        private static readonly string[] EmissiveColorProps = { "_EmissionColor", "_EmissiveColor", "_EmAnim1Color", "_EmAnim2Color" };
+
+        private class EmissiveState
         {
-            public float Baseline;
-            public float LastSet;
+            public readonly Dictionary<string, float> Floats = new Dictionary<string, float>();
+            public readonly Dictionary<string, Color> Colors = new Dictionary<string, Color>();
+            public bool StandardKeyword;
         }
+
+        private readonly Dictionary<Material, EmissiveState> _dimmedEmissives = new Dictionary<Material, EmissiveState>();
 
         private void Awake()
         {
@@ -171,30 +176,6 @@ namespace Blackout
                 "Aim at a door and press to log its scene Id, key requirement and state - used to pick doors for the lock feature");
 
             LoadSoundBundle();
-
-            // the game re-asserts tactical light intensity after LateUpdate, this hook runs last
-            Application.onBeforeRender += OnBeforeRender;
-        }
-
-        private void OnDestroy()
-        {
-            Application.onBeforeRender -= OnBeforeRender;
-        }
-
-        private void OnBeforeRender()
-        {
-            if (!_blackoutActive)
-            {
-                return;
-            }
-            try
-            {
-                ApplyGearBoost();
-            }
-            catch
-            {
-                // Update's error path already reports; keep the render-phase hook quiet
-            }
         }
 
         private void Update()
@@ -234,11 +215,15 @@ namespace Blackout
                     _blackoutActive = false;
                     _killedLights.Clear();
                     _trackedLights.Clear();
-                    _gearLights.Clear();
+                    _switchedLamps.Clear();
+                    _trackedLamps.Clear();
+                    _disabledLightSceneRoots.Clear();
+                    // materials are assets that outlive the raid - un-dim them or the next
+                    // raid (any map) inherits dead lamps
+                    RestoreEmissiveMaterials();
                     _originalLightmaps = null;
                     _subtitleText = null;
                     _ambienceSource = null;
-                    DestroyPpVolume();
                 }
                 return;
             }
@@ -370,16 +355,36 @@ namespace Blackout
             _originalLightmaps = LightmapSettings.lightmaps;
             LightmapSettings.lightmaps = new LightmapData[0];
 
-            if (_ppVolume == null)
-            {
-                CreatePpVolume();
-            }
-
             _nextRescan = 0f;
+            DisableLightScene();
             EnforceBlackout();
             PlayPowerDownSound();
             StartAmbience();
-            Logger.LogInfo($"[Blackout] Power cut: {_killedLights.Count} lights killed, pp volume {(_ppVolume != null ? "on" : "OFF")}");
+            Logger.LogInfo($"[Blackout] Power cut: {_killedLights.Count} lights killed, {_switchedLamps.Count} lamp fixtures switched off, {_dimmedEmissives.Count} emissive materials dimmed");
+        }
+
+        // the live event's dark preset simply doesn't load the map's *_LIGHT scene - it holds
+        // the physical fixtures (glowing tubes, screens) and their lights; disabling its roots
+        // is the runtime equivalent
+        private void DisableLightScene()
+        {
+            for (var i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
+            {
+                var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+                if (!scene.isLoaded || scene.name.IndexOf("_LIGHT", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+                foreach (var root in scene.GetRootGameObjects())
+                {
+                    if (root != null && root.activeSelf)
+                    {
+                        root.SetActive(false);
+                        _disabledLightSceneRoots.Add(root);
+                    }
+                }
+                Logger.LogInfo($"[Blackout] Light scene '{scene.name}' disabled ({_disabledLightSceneRoots.Count} roots)");
+            }
         }
 
         private void EnforceBlackout()
@@ -397,15 +402,42 @@ namespace Blackout
                     }
                     _trackedLights.Add(light);
 
-                    // player/bot gear lights (flashlights, lasers) get boosted instead of killed -
-                    // they must punch through the exposure drop like they would on a real night raid
+                    // player/bot gear lights (flashlights, lasers) stay untouched - real
+                    // darkness needs no compensation, the game manages them
                     if (IsGearLight(light))
                     {
-                        _gearLights[light] = new GearLightState { Baseline = light.intensity, LastSet = light.intensity };
                         continue;
                     }
                     _killedLights.Add(new LightState { Light = light, Intensity = light.intensity });
                 }
+
+                // the game's own fixture switch: kills the lamp's emissive glass, flares and
+                // lights together, exactly like shooting one out - the real physical blackout
+                foreach (var lamp in FindObjectsOfType<EFT.Interactive.LampController>())
+                {
+                    if (lamp == null || _trackedLamps.Contains(lamp))
+                    {
+                        continue;
+                    }
+                    _trackedLamps.Add(lamp);
+                    var lampState = lamp.LampState;
+                    if (lampState == EFT.Interactive.Turnable.EState.Off
+                        || lampState == EFT.Interactive.Turnable.EState.Destroyed)
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        lamp.Switch(EFT.Interactive.Turnable.EState.Off);
+                        _switchedLamps.Add(lamp);
+                    }
+                    catch
+                    {
+                        // one broken lamp must not stop the sweep
+                    }
+                }
+
+                DimEmissiveMaterials();
 
                 // weapons are pooled, a light discovered outside any player hierarchy can later
                 // end up in someone's hands, re-check and resurrect those as gear
@@ -424,7 +456,6 @@ namespace Blackout
                     _killedLights.RemoveAt(i);
                     state.Light.enabled = true;
                     state.Light.intensity = state.Intensity;
-                    _gearLights[state.Light] = new GearLightState { Baseline = state.Intensity, LastSet = state.Intensity };
                 }
             }
 
@@ -436,18 +467,9 @@ namespace Blackout
                 }
             }
 
-            ApplyGearBoost();
-
             RenderSettings.ambientIntensity = 0f;
             RenderSettings.ambientLight = Color.black;
             RenderSettings.reflectionIntensity = 0f;
-
-            // EFT's shaders light Labs through their own channels, so image-space exposure
-            // is the only lever guaranteed to reach night-raid darkness
-            if (_colorGrading != null)
-            {
-                _colorGrading.postExposure.value = CutExposure;
-            }
 
             if (_ambienceSource != null)
             {
@@ -455,27 +477,81 @@ namespace Blackout
             }
         }
 
-        private void ApplyGearBoost()
+        // the glow that survives everything else: surfaces on EFT's emissive shader family
+        // (sky ceiling wallpaper, lamp glass atlases, LED panels) plus Standard-shader
+        // backlights - zero their shared materials' emission scene-wide
+        private void DimEmissiveMaterials()
         {
-            // rebase when the game changes intensity (toggles), then cancel half the exposure drop
-            // (full cancellation overdrives specular reflections)
-            var boost = Mathf.Pow(2f, -CutExposure) * 0.5f;
-            foreach (var pair in _gearLights)
+            foreach (var mat in Resources.FindObjectsOfTypeAll<Material>())
             {
-                var light = pair.Key;
-                var state = pair.Value;
-                if (light == null)
+                if (mat == null || mat.shader == null || _dimmedEmissives.ContainsKey(mat))
                 {
                     continue;
                 }
-                var current = light.intensity;
-                if (Mathf.Abs(current - state.LastSet) > 0.001f)
+                var shaderName = mat.shader.name;
+                var standard = shaderName == "Standard";
+                if (!standard && !shaderName.Contains("Emissive"))
                 {
-                    state.Baseline = current;
+                    continue;
                 }
-                light.intensity = state.Baseline * boost;
-                state.LastSet = light.intensity;
+                var keywordOn = standard && mat.IsKeywordEnabled("_EMISSION");
+                if (standard && !keywordOn)
+                {
+                    continue;
+                }
+
+                var state = new EmissiveState { StandardKeyword = keywordOn };
+                foreach (var prop in EmissiveFloatProps)
+                {
+                    if (mat.HasProperty(prop))
+                    {
+                        state.Floats[prop] = mat.GetFloat(prop);
+                        mat.SetFloat(prop, 0f);
+                    }
+                }
+                foreach (var prop in EmissiveColorProps)
+                {
+                    if (mat.HasProperty(prop))
+                    {
+                        state.Colors[prop] = mat.GetColor(prop);
+                        mat.SetColor(prop, Color.black);
+                    }
+                }
+                if (state.Floats.Count == 0 && state.Colors.Count == 0 && !keywordOn)
+                {
+                    continue;
+                }
+                if (keywordOn)
+                {
+                    mat.DisableKeyword("_EMISSION");
+                }
+                _dimmedEmissives[mat] = state;
             }
+        }
+
+        private void RestoreEmissiveMaterials()
+        {
+            foreach (var pair in _dimmedEmissives)
+            {
+                var mat = pair.Key;
+                if (mat == null)
+                {
+                    continue;
+                }
+                foreach (var prop in pair.Value.Floats)
+                {
+                    mat.SetFloat(prop.Key, prop.Value);
+                }
+                foreach (var prop in pair.Value.Colors)
+                {
+                    mat.SetColor(prop.Key, prop.Value);
+                }
+                if (pair.Value.StandardKeyword)
+                {
+                    mat.EnableKeyword("_EMISSION");
+                }
+            }
+            _dimmedEmissives.Clear();
         }
 
         private static bool IsGearLight(Light light)
@@ -499,42 +575,6 @@ namespace Blackout
             return light.GetComponentInParent<Player>() != null;
         }
 
-        private void CreatePpVolume()
-        {
-            var ppLayer = FindObjectOfType<PostProcessLayer>();
-            if (ppLayer == null)
-            {
-                Logger.LogWarning("[Blackout] No PostProcessLayer found, exposure darkening unavailable");
-                return;
-            }
-
-            var mask = ppLayer.volumeLayer.value;
-            var layerIndex = 0;
-            for (var i = 0; i < 32; i++)
-            {
-                if ((mask & (1 << i)) != 0)
-                {
-                    layerIndex = i;
-                    break;
-                }
-            }
-
-            _colorGrading = ScriptableObject.CreateInstance<ColorGrading>();
-            _colorGrading.enabled.Override(true);
-            _colorGrading.postExposure.Override(CutExposure);
-            _ppVolume = PostProcessManager.instance.QuickVolume(layerIndex, 1000f, _colorGrading);
-        }
-
-        private void DestroyPpVolume()
-        {
-            if (_ppVolume != null)
-            {
-                RuntimeUtilities.DestroyVolume(_ppVolume, true, true);
-            }
-            _ppVolume = null;
-            _colorGrading = null;
-        }
-
         private void RestoreEverything()
         {
             _blackoutActive = false;
@@ -550,7 +590,33 @@ namespace Blackout
             }
             _killedLights.Clear();
             _trackedLights.Clear();
-            _gearLights.Clear();
+
+            foreach (var lamp in _switchedLamps)
+            {
+                if (lamp == null)
+                {
+                    continue;
+                }
+                try
+                {
+                    lamp.Switch(EFT.Interactive.Turnable.EState.On);
+                }
+                catch
+                {
+                    // keep restoring the rest
+                }
+            }
+            _switchedLamps.Clear();
+            _trackedLamps.Clear();
+
+            foreach (var root in _disabledLightSceneRoots)
+            {
+                if (root != null)
+                {
+                    root.SetActive(true);
+                }
+            }
+            _disabledLightSceneRoots.Clear();
 
             if (_originalLightmaps != null)
             {
@@ -560,7 +626,7 @@ namespace Blackout
             RenderSettings.ambientIntensity = _originalAmbientIntensity;
             RenderSettings.ambientLight = _originalAmbientLight;
             RenderSettings.reflectionIntensity = _originalReflectionIntensity;
-            DestroyPpVolume();
+            RestoreEmissiveMaterials();
             StopAmbience();
 
             Logger.LogInfo("[Blackout] Power restored (mod disabled mid-raid)");
@@ -1053,7 +1119,9 @@ namespace Blackout
             {
                 return;
             }
-            var hits = Physics.RaycastAll(cam.transform.position, cam.transform.forward, 8f);
+            // long reach for ceilings; ignore trigger volumes (spawn/quest zones swallow the ray)
+            var hits = Physics.RaycastAll(cam.transform.position, cam.transform.forward, 60f,
+                Physics.AllLayers, QueryTriggerInteraction.Ignore);
             Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
             EFT.Interactive.WorldInteractiveObject wio = null;
             foreach (var h in hits)
@@ -1075,6 +1143,22 @@ namespace Blackout
                         continue;
                     }
                     Logger.LogInfo($"[Blackout DOOR] surface point={h.point} normal={h.normal} on '{h.collider.name}' (for switch placement)");
+                    // material recon for tracking down still-glowing emissive surfaces
+                    var rends = h.collider.GetComponentsInChildren<Renderer>(true);
+                    if (rends.Length == 0 && h.collider.transform.parent != null)
+                    {
+                        rends = h.collider.transform.parent.GetComponentsInChildren<Renderer>(true);
+                    }
+                    foreach (var rend in rends)
+                    {
+                        foreach (var m in rend.sharedMaterials)
+                        {
+                            if (m != null)
+                            {
+                                Logger.LogInfo($"[Blackout DOOR] renderer '{rend.gameObject.name}' material '{m.name}' shader '{(m.shader != null ? m.shader.name : "null")}'");
+                            }
+                        }
+                    }
                     return;
                 }
                 Logger.LogInfo("[Blackout DOOR] nothing static within 8m");
