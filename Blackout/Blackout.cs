@@ -17,7 +17,7 @@ namespace Blackout
     {
         private const string LabsLocationId = "laboratory";
 
-        private const float RescanIntervalSec = 2f;
+        private const float RescanIntervalSec = 5f;
 
         // the live Admin's key id, created server-side by BlackoutServer
         private const string BlackoutKeyTemplateId = "6a33c17933cff6b88c08902e";
@@ -104,6 +104,9 @@ namespace Blackout
         }
 
         private readonly Dictionary<Material, EmissiveState> _dimmedEmissives = new Dictionary<Material, EmissiveState>();
+        private int _stableSweeps;
+        private int _stableLightScans;
+        private readonly HashSet<Light> _reportedRelights = new HashSet<Light>();
 
         private void Awake()
         {
@@ -218,6 +221,9 @@ namespace Blackout
                     _switchedLamps.Clear();
                     _trackedLamps.Clear();
                     _disabledLightSceneRoots.Clear();
+                    _stableSweeps = 0;
+                    _stableLightScans = 0;
+                    _reportedRelights.Clear();
                     // materials are assets that outlive the raid - un-dim them or the next
                     // raid (any map) inherits dead lamps
                     RestoreEmissiveMaterials();
@@ -356,6 +362,8 @@ namespace Blackout
             LightmapSettings.lightmaps = new LightmapData[0];
 
             _nextRescan = 0f;
+            _stableSweeps = 0;
+            _stableLightScans = 0;
             DisableLightScene();
             EnforceBlackout();
             PlayPowerDownSound();
@@ -394,50 +402,86 @@ namespace Blackout
             if (Time.time >= _nextRescan)
             {
                 _nextRescan = Time.time + RescanIntervalSec;
-                foreach (var light in FindObjectsOfType<Light>())
+                if (_stableLightScans < 6)
                 {
-                    if (light == null || _trackedLights.Contains(light))
+                    var lightsBefore = _killedLights.Count;
+                    foreach (var light in FindObjectsOfType<Light>())
                     {
-                        continue;
-                    }
-                    _trackedLights.Add(light);
+                        if (light == null || _trackedLights.Contains(light))
+                        {
+                            continue;
+                        }
+                        // leave alone entirely: muzzle flashes and pooled effect lights
+                        // (gunfire/impacts/grenades) belong in the dark, and the red keycard
+                        // LEDs are the one thing the live dark scene keeps lit
+                        var lightName = light.name.ToLowerInvariant();
+                        if (lightName.Contains("muzzle") || lightName.Contains("lightofpool")
+                            || lightName.Contains("red_light"))
+                        {
+                            continue;
+                        }
+                        _trackedLights.Add(light);
 
-                    // player/bot gear lights (flashlights, lasers) stay untouched - real
-                    // darkness needs no compensation, the game manages them
-                    if (IsGearLight(light))
-                    {
-                        continue;
+                        // player/bot gear lights (flashlights, lasers) stay untouched - real
+                        // darkness needs no compensation, the game manages them
+                        if (IsGearLight(light))
+                        {
+                            continue;
+                        }
+                        // evidence line: does anything real ever show up after the first pass?
+                        if (_stableLightScans > 0 || _killedLights.Count > 0 && Time.time > _blackoutAt + RescanIntervalSec)
+                        {
+                            Logger.LogInfo($"[Blackout] LATE light discovered: '{light.name}' type={light.type} at t+{Time.time - _blackoutAt:0}s");
+                        }
+                        _killedLights.Add(new LightState { Light = light, Intensity = light.intensity });
                     }
-                    _killedLights.Add(new LightState { Light = light, Intensity = light.intensity });
-                }
-
-                // the game's own fixture switch: kills the lamp's emissive glass, flares and
-                // lights together, exactly like shooting one out - the real physical blackout
-                foreach (var lamp in FindObjectsOfType<EFT.Interactive.LampController>())
-                {
-                    if (lamp == null || _trackedLamps.Contains(lamp))
+                    _stableLightScans = _killedLights.Count == lightsBefore ? _stableLightScans + 1 : 0;
+                    if (_stableLightScans == 6)
                     {
-                        continue;
-                    }
-                    _trackedLamps.Add(lamp);
-                    var lampState = lamp.LampState;
-                    if (lampState == EFT.Interactive.Turnable.EState.Off
-                        || lampState == EFT.Interactive.Turnable.EState.Destroyed)
-                    {
-                        continue;
-                    }
-                    try
-                    {
-                        lamp.Switch(EFT.Interactive.Turnable.EState.Off);
-                        _switchedLamps.Add(lamp);
-                    }
-                    catch
-                    {
-                        // one broken lamp must not stop the sweep
+                        Logger.LogInfo($"[Blackout] Light discovery retired: {_killedLights.Count} scene lights held dark");
                     }
                 }
 
-                DimEmissiveMaterials();
+                // the lamp and material sweeps are whole-scene scans - once they stop finding
+                // anything new for a few passes, retire them (the light scan stays, lights
+                // keep appearing over a raid)
+                if (_stableSweeps < 3)
+                {
+                    var lampsBefore = _trackedLamps.Count;
+                    var emissivesBefore = _dimmedEmissives.Count;
+
+                    // the game's own fixture switch: kills the lamp's emissive glass, flares
+                    // and lights together, exactly like shooting one out
+                    foreach (var lamp in FindObjectsOfType<EFT.Interactive.LampController>())
+                    {
+                        if (lamp == null || _trackedLamps.Contains(lamp))
+                        {
+                            continue;
+                        }
+                        _trackedLamps.Add(lamp);
+                        var lampState = lamp.LampState;
+                        if (lampState == EFT.Interactive.Turnable.EState.Off
+                            || lampState == EFT.Interactive.Turnable.EState.Destroyed)
+                        {
+                            continue;
+                        }
+                        try
+                        {
+                            lamp.Switch(EFT.Interactive.Turnable.EState.Off);
+                            _switchedLamps.Add(lamp);
+                        }
+                        catch
+                        {
+                            // one broken lamp must not stop the sweep
+                        }
+                    }
+
+                    DimEmissiveMaterials();
+
+                    _stableSweeps = _trackedLamps.Count == lampsBefore && _dimmedEmissives.Count == emissivesBefore
+                        ? _stableSweeps + 1
+                        : 0;
+                }
 
                 // weapons are pooled, a light discovered outside any player hierarchy can later
                 // end up in someone's hands, re-check and resurrect those as gear
@@ -463,6 +507,12 @@ namespace Blackout
             {
                 if (state.Light != null && state.Light.enabled)
                 {
+                    // evidence line: does the game actually re-enable killed lights (the
+                    // "sun comes back" claim)? throttled to one report per offender
+                    if (_reportedRelights.Add(state.Light))
+                    {
+                        Logger.LogInfo($"[Blackout] RE-ENABLED by game: '{state.Light.name}' type={state.Light.type} at t+{Time.time - _blackoutAt:0}s");
+                    }
                     state.Light.enabled = false;
                 }
             }
