@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="marker_digits.png" LogicalName="Blackout.marker_digits.png" />
+    <EmbeddedResource Include="hint_marker.png" LogicalName="Blackout.hint_marker.png" />
     <EmbeddedResource Include="board_overlay.png" LogicalName="Blackout.board_overlay.png" />
     <EmbeddedResource Include="keypad\*.png" LogicalName="Blackout.keypad.%(Filename).png" />
   </ItemGroup>

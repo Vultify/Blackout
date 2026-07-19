@@ -1862,13 +1862,14 @@ namespace Blackout
 
             blitMat.SetPass(0);
 
-            // code sits on the viewer's right half of the board like the live one - viewer
-            // right is local -x; digit ~0.14m wide, 0.21m tall, at ~62% board height
-            const float digitW = 0.14f * 0.4334f;
-            const float digitH = 0.21f * 0.4313f;
-            const float startX = -0.11f;
-            const float stepX = -0.17f;
-            const float boardZ = 1.87f;
+            // digits at the live event's own decal poses: DecalHint_Paint_00..03 sit at world
+            // z -335.04..-334.74 (0.10m pitch, viewer's right half), y ~1.795 - converted to
+            // board-local via the same affine as the UV map. Cell aspect 256x341
+            const float digitW = 0.10f * 0.4334f;
+            const float digitH = 0.133f * 0.4313f;
+            const float startX = -0.473f;
+            const float stepX = -0.10f;
+            const float boardZ = 1.702f;
             GL.Begin(GL.QUADS);
             GL.Color(Color.white);
             for (var i = 0; i < _raidCode.Length; i++)
@@ -1876,15 +1877,20 @@ namespace Blackout
                 var digit = _raidCode[i] - '0';
                 var u = 0.4895f - 0.4334f * (startX + stepX * i);
                 var v = 0.9933f - 0.4313f * (boardZ - 0.892f);
-                var au0 = digit / 10f;
-                var au1 = (digit + 1) / 10f;
+                // atlas grid: top row 1,2,3,0; middle 4,5,6; bottom 7,8,9
+                var col = digit == 0 ? 3 : (digit - 1) % 3;
+                var rowIdx = digit == 0 ? 0 : (digit - 1) / 3;
+                var au0 = col / 4f;
+                var au1 = (col + 1) / 4f;
+                var avTop = 1f - rowIdx / 3f;
+                var avBottom = 1f - (rowIdx + 1) / 3f;
 
                 // board art is stored v-flipped (v grows toward the board's bottom), so the
                 // glyph's atlas v is flipped to land upright on the rendered board
-                GL.TexCoord2(au0, 1f); GL.Vertex3(u - digitW / 2f, v - digitH / 2f, 0f);
-                GL.TexCoord2(au1, 1f); GL.Vertex3(u + digitW / 2f, v - digitH / 2f, 0f);
-                GL.TexCoord2(au1, 0f); GL.Vertex3(u + digitW / 2f, v + digitH / 2f, 0f);
-                GL.TexCoord2(au0, 0f); GL.Vertex3(u - digitW / 2f, v + digitH / 2f, 0f);
+                GL.TexCoord2(au0, avTop); GL.Vertex3(u - digitW / 2f, v - digitH / 2f, 0f);
+                GL.TexCoord2(au1, avTop); GL.Vertex3(u + digitW / 2f, v - digitH / 2f, 0f);
+                GL.TexCoord2(au1, avBottom); GL.Vertex3(u + digitW / 2f, v + digitH / 2f, 0f);
+                GL.TexCoord2(au0, avBottom); GL.Vertex3(u - digitW / 2f, v + digitH / 2f, 0f);
             }
             GL.End();
             GL.PopMatrix();
@@ -1894,7 +1900,9 @@ namespace Blackout
             Logger.LogInfo($"[Blackout] code baked onto board texture ({src.width}x{src.height})");
         }
 
-        private Texture2D LoadDigitAtlas() => LoadEmbeddedTexture("Blackout.marker_digits.png");
+        // the live event's own hand-painted digit art: DecalHint_Marker (live sharedassets704),
+        // a 4x3 atlas - top row 1,2,3,0 then 4,5,6 and 7,8,9 (last column scribble patches)
+        private Texture2D LoadDigitAtlas() => LoadEmbeddedTexture("Blackout.hint_marker.png");
 
         private static Texture2D LoadEmbeddedTexture(string resource)
         {

@@ -17,7 +17,7 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 - The live event's amber emergency floods, spawned at the real dark-scene siren positions near the gates, brightness configurable
 - Labs' keycard blinkers and door-status LEDs stay alive and script-driven during the blackout, like the live event keeps them
 - Ambient Level slider - 0 is live-event black, nudge it up for a hint of visibility
-- The admin office whiteboard from the live event, cloned at the real event pose, with a fresh 4-digit emergency code handwritten on it every raid plus the live board's own markings
+- The admin office whiteboard from the live event, cloned at the real event pose, with a fresh 4-digit emergency code every raid - written in the live event's own hand-painted marker digits, next to the real board markings (the cleaning shift roster and notes), all placed at the live decal positions
 - Keycard doors take the emergency code during the blackout: swiping is disabled, the reader opens the live event's keypad (its real panel sprites, layout and bender font, recovered from the live UI files), right code unlocks with the door's own granted beep, wrong code gets the denied beep and the reader's red LED flicker
 ### Changed
 - Real darkness instead of a camera trick: the map's light scene is dropped the way the live dark preset does it, fixtures and emissive surfaces (sky ceiling, lamp glass, LED panels) go physically dark, the map's own ambient lighting channels are taken over at the source, and the screen-wide exposure cut is gone - flashlights now just work, no compensation needed
