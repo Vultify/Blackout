@@ -9,3 +9,6 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 - Announcement plays through the map's own PA speaker objects at normalized pitch, with a virtual speaker array fallback for maps without them
 - Announcement System text box in the game's Bender font during the intercom voice, text configurable
 - Flashlights and gear lights protected from the light kill and compensated against the exposure drop
+- The event's dark ambience loop after the cut, volume configurable
+- Admin's key recreated 1:1 from the live event (real item id, name and description) via a new server-side component
+- First lockdown door: the Labs medical corridor door starts locked and closed, opened by the Admin's key

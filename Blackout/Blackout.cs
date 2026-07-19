@@ -3,13 +3,12 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-using Audio.SpatialSystem;
 using BepInEx;
 using BepInEx.Configuration;
 using Comfort.Common;
 using EFT;
-using HarmonyLib;
 using UnityEngine;
+using UnityEngine.Audio;
 using UnityEngine.Rendering.PostProcessing;
 
 namespace Blackout
@@ -20,34 +19,29 @@ namespace Blackout
         private const string LabsLocationId = "laboratory";
 
         private const float RescanIntervalSec = 2f;
-        // matched against live event footage: near-black with faint silhouettes
+        // tuned by eye against live event footage
         private const float CutExposure = -2f;
 
-        public enum SoundMethod
+        // the live Admin's key id, created server-side by BlackoutServer
+        private const string BlackoutKeyTemplateId = "6a33c17933cff6b88c08902e";
+        private static readonly string[] LockedDoorIds =
         {
-            GuiSounds,
-            SceneMixerClone,
-            AtPointEnvironment,
-            Nonspatial,
-            NonspatialBypass,
-            RawAudioSource2D,
-            RawAudioSource3D
-        }
+            "door_Laboratory_Medical_corridor_floor_1_00006",
+        };
 
         private ConfigEntry<bool> _modEnabled;
         private ConfigEntry<bool> _labsOnly;
         private ConfigEntry<float> _delaySeconds;
         private ConfigEntry<float> _soundVolume;
-        private ConfigEntry<SoundMethod> _soundMethod;
+        private ConfigEntry<float> _ambienceVolume;
         private ConfigEntry<bool> _announcementEnabled;
         private ConfigEntry<float> _announcementDelay;
         private ConfigEntry<bool> _subtitleEnabled;
         private ConfigEntry<string> _subtitleTextCfg;
-        private ConfigEntry<KeyboardShortcut> _testSoundKey;
-        private ConfigEntry<KeyboardShortcut> _dumpLightsKey;
-        private ConfigEntry<KeyboardShortcut> _knownClipKey;
+        private ConfigEntry<KeyboardShortcut> _inspectDoorKey;
 
         private bool _inRaid;
+        private bool _doorsLocked;
         private bool _statusStarted;
         private Vector3 _startPos;
         private Vector2 _startLook;
@@ -61,24 +55,19 @@ namespace Blackout
         private bool _announcementPlayed;
         private AudioClip _powerDownClip;
         private AudioClip _announcerClip;
+        private AudioClip _ambienceClip;
+        private AudioSource _ambienceSource;
         private string _subtitleText;
         private float _subtitleUntil;
         private Texture2D _subtitleBg;
         private Texture2D _subtitleFrame;
         private GUIStyle _subtitleStyle;
         private bool _errorLogged;
-        private float _nextAudioScan;
-        private readonly HashSet<int> _scannedPlaying = new HashSet<int>();
 
         private readonly List<LightState> _killedLights = new List<LightState>();
         private readonly HashSet<Light> _trackedLights = new HashSet<Light>();
         private readonly Dictionary<Light, GearLightState> _gearLights = new Dictionary<Light, GearLightState>();
 
-        private class GearLightState
-        {
-            public float Baseline;
-            public float LastSet;
-        }
         private PostProcessVolume _ppVolume;
         private ColorGrading _colorGrading;
         private LightmapData[] _originalLightmaps;
@@ -92,17 +81,19 @@ namespace Blackout
             public float Intensity;
         }
 
-        internal static BepInEx.Logging.ManualLogSource Log;
+        private class GearLightState
+        {
+            public float Baseline;
+            public float LastSet;
+        }
 
         private void Awake()
         {
-            Log = Logger;
-            new Harmony("com.vultify.blackout").PatchAll(Assembly.GetExecutingAssembly());
             _modEnabled = Config.Bind(
                 "1. General",
                 "Enable Mod",
                 true,
-                "Master toggle — enables or disables the entire mod");
+                "Master toggle - enables or disables the entire mod");
 
             _labsOnly = Config.Bind(
                 "1. General",
@@ -123,14 +114,16 @@ namespace Blackout
                 "Volume",
                 0.8f,
                 new ConfigDescription(
-                    "Volume of the generator power-down sound",
+                    "Volume of the blackout sound and announcement",
                     new AcceptableValueRange<float>(0f, 1f)));
 
-            _soundMethod = Config.Bind(
+            _ambienceVolume = Config.Bind(
                 "3. Sound",
-                "Playback Method",
-                SoundMethod.GuiSounds,
-                "How the sound is routed into the game's audio. If you can't hear it, try another method and press the test key");
+                "Ambience Volume",
+                0.35f,
+                new ConfigDescription(
+                    "Volume of the event's dark ambience loop after the power cut. 0 disables it",
+                    new AcceptableValueRange<float>(0f, 1f)));
 
             _announcementEnabled = Config.Bind(
                 "3. Sound",
@@ -158,114 +151,16 @@ namespace Blackout
                 "The facility has been switched to emergency power. Please remain where you are and await evacuation.",
                 "Text shown in the Announcement System box while the intercom voice plays");
 
-            _testSoundKey = Config.Bind(
+            _inspectDoorKey = Config.Bind(
                 "4. Debug",
-                "Test Sound Key",
+                "Inspect Door Key",
                 new KeyboardShortcut(KeyCode.F10),
-                "Plays the power-down sound in-raid using the selected playback method, for testing without restarting");
-
-            _dumpLightsKey = Config.Bind(
-                "4. Debug",
-                "Dump Lights Key",
-                new KeyboardShortcut(KeyCode.F11),
-                "Logs every enabled light in the scene (turn your flashlight on first) so flashlight handling can be debugged");
-
-            _knownClipKey = Config.Bind(
-                "4. Debug",
-                "Known Clip Test Key",
-                new KeyboardShortcut(KeyCode.F9),
-                "Plays a clip the game itself loaded, via the selected playback method - tells apart broken routing from broken files");
+                "Aim at a door and press to log its scene Id, key requirement and state - used to pick doors for the lock feature");
 
             LoadSoundBundle();
 
             // the game re-asserts tactical light intensity after LateUpdate, this hook runs last
             Application.onBeforeRender += OnBeforeRender;
-        }
-
-        // catches announcements played by ANY system: dumps every new voice-length source that starts playing
-        private void ScanPlayingAudio()
-        {
-            if (Time.time < _nextAudioScan)
-            {
-                return;
-            }
-            _nextAudioScan = Time.time + 0.5f;
-
-            var gw = Singleton<GameWorld>.Instance;
-            var playerPos = gw != null && gw.MainPlayer != null ? gw.MainPlayer.Position : Vector3.zero;
-            foreach (var s in FindObjectsOfType<AudioSource>())
-            {
-                if (s == null || !s.isPlaying || s.clip == null || s.clip.length < 2.5f || s.loop)
-                {
-                    continue;
-                }
-                var id = s.GetInstanceID();
-                if (!_scannedPlaying.Add(id))
-                {
-                    continue;
-                }
-                var path = s.gameObject.name;
-                var t = s.transform.parent;
-                for (var i = 0; i < 6 && t != null; i++, t = t.parent)
-                {
-                    path = t.name + "/" + path;
-                }
-                var mixer = s.outputAudioMixerGroup;
-                var dist = Vector3.Distance(s.transform.position, playerPos);
-                if (s.rolloffMode == AudioRolloffMode.Custom)
-                {
-                    var curve = s.GetCustomCurve(AudioSourceCurveType.CustomRolloff);
-                    if (curve != null)
-                    {
-                        var pts = "";
-                        foreach (var k in curve.keys)
-                        {
-                            pts += $"({k.time:0.000},{k.value:0.000}) ";
-                        }
-                        Log.LogInfo($"[Blackout SCAN] curve '{s.gameObject.name}': {pts}");
-                    }
-                }
-                Log.LogInfo($"[Blackout SCAN] playing clip='{s.clip.name}' len={s.clip.length:0.0}s vol={s.volume:0.00} blend={s.spatialBlend:0.00} spatialize={s.spatialize} min={s.minDistance:0.0} max={s.maxDistance:0.0} rolloffMode={s.rolloffMode} prio={s.priority} reverb={s.reverbZoneMix:0.00} spread={s.spread:0.0} bypassFx={s.bypassEffects}/{s.bypassListenerEffects}/{s.bypassReverbZones} mixer={(mixer != null ? mixer.audioMixer.name + "/" + mixer.name : "none")} dist={dist:0.0}m :: {path}");
-            }
-        }
-
-        private void HandleDebugKeys()
-        {
-            if (_testSoundKey.Value.IsDown())
-            {
-                Logger.LogInfo("[Blackout] Test announcement via intercom path");
-                PlayAnnouncement();
-            }
-
-            if (_knownClipKey.Value.IsDown())
-            {
-                AudioClip donor = null;
-                foreach (var s in FindObjectsOfType<AudioSource>())
-                {
-                    if (s != null && s.clip != null)
-                    {
-                        donor = s.clip;
-                        if (s.isPlaying)
-                        {
-                            break;
-                        }
-                    }
-                }
-                if (donor == null)
-                {
-                    Logger.LogWarning("[Blackout] No scene AudioSource with a clip found for the known-clip test");
-                }
-                else
-                {
-                    Logger.LogInfo($"[Blackout] Known-clip test: '{donor.name}' ({donor.length:0.0}s) via {_soundMethod.Value}");
-                    PlayClip(donor);
-                }
-            }
-
-            if (_dumpLightsKey.Value.IsDown())
-            {
-                DumpLights();
-            }
         }
 
         private void OnDestroy()
@@ -289,72 +184,6 @@ namespace Blackout
             }
         }
 
-        private void ApplyGearBoost()
-        {
-            // rebase when the game changes intensity (toggles), then cancel the exposure drop exactly
-            var boost = Mathf.Pow(2f, -CutExposure) * 0.5f;
-            foreach (var pair in _gearLights)
-            {
-                var light = pair.Key;
-                var state = pair.Value;
-                if (light == null)
-                {
-                    continue;
-                }
-                var current = light.intensity;
-                if (Mathf.Abs(current - state.LastSet) > 0.001f)
-                {
-                    state.Baseline = current;
-                }
-                light.intensity = state.Baseline * boost;
-                state.LastSet = light.intensity;
-            }
-        }
-
-        private static bool IsGearLight(Light light)
-        {
-            if (light.name.ToLowerInvariant().Contains("muzzle"))
-            {
-                return false;
-            }
-            // the flashlight controller marks every tactical device light, pooled or not
-            if (light.GetComponentInParent<TacticalComboVisualController>() != null)
-            {
-                return true;
-            }
-            for (var t = light.transform; t != null; t = t.parent)
-            {
-                if (t.name.StartsWith("nvg_") || t.name.StartsWith("flashlight_"))
-                {
-                    return true;
-                }
-            }
-            return light.GetComponentInParent<Player>() != null;
-        }
-
-        private void DumpLights()
-        {
-            var all = FindObjectsOfType<Light>();
-            Logger.LogInfo($"[Blackout] === LIGHT DUMP: {all.Length} lights, {_gearLights.Count} tracked as gear, {_killedLights.Count} killed ===");
-            foreach (var light in all)
-            {
-                if (light == null || !light.enabled)
-                {
-                    continue;
-                }
-                var path = light.name;
-                var t = light.transform.parent;
-                for (var i = 0; i < 8 && t != null; i++, t = t.parent)
-                {
-                    path = t.name + "/" + path;
-                }
-                var underPlayer = light.GetComponentInParent<Player>() != null;
-                var gear = _gearLights.ContainsKey(light) ? "gear" : "notGear";
-                Logger.LogInfo($"[Blackout]   ENABLED {light.type} intensity={light.intensity:0.##} range={light.range:0.#} underPlayer={underPlayer} {gear} :: {path}");
-            }
-            Logger.LogInfo("[Blackout] === END LIGHT DUMP ===");
-        }
-
         private void Update()
         {
             try
@@ -374,8 +203,6 @@ namespace Blackout
 
         private void Tick()
         {
-            HandleDebugKeys();
-
             var gameWorld = Singleton<GameWorld>.Instance;
             if (gameWorld == null || gameWorld.MainPlayer == null)
             {
@@ -383,6 +210,7 @@ namespace Blackout
                 {
                     // raid ended; the scene (and everything we touched) is gone
                     _inRaid = false;
+                    _doorsLocked = false;
                     _statusStarted = false;
                     _clockStarted = false;
                     _blackoutActive = false;
@@ -391,6 +219,7 @@ namespace Blackout
                     _gearLights.Clear();
                     _originalLightmaps = null;
                     _subtitleText = null;
+                    _ambienceSource = null;
                     DestroyPpVolume();
                 }
                 return;
@@ -398,7 +227,17 @@ namespace Blackout
 
             _inRaid = true;
 
-            ScanPlayingAudio();
+            if (!_doorsLocked && _modEnabled.Value
+                && (!_labsOnly.Value || gameWorld.LocationId == LabsLocationId))
+            {
+                _doorsLocked = true;
+                LockEventDoors();
+            }
+
+            if (_inspectDoorKey.Value.IsDown())
+            {
+                InspectAimedDoor();
+            }
 
             if (!_modEnabled.Value)
             {
@@ -416,7 +255,6 @@ namespace Blackout
                     && _announcerClip != null && Time.time >= _announcementAt)
                 {
                     _announcementPlayed = true;
-                    Logger.LogInfo("[Blackout] Announcement fired");
                     PlayAnnouncement();
                     if (_subtitleEnabled.Value && !string.IsNullOrWhiteSpace(_subtitleTextCfg.Value))
                     {
@@ -465,7 +303,6 @@ namespace Blackout
                 {
                     return;
                 }
-                Logger.LogInfo($"[Blackout] Control detected (moved {_accumMove:0.0}m, looked {_accumLook:0} deg) at t={Time.time:0.0}");
                 _clockStarted = true;
                 _blackoutAt = Time.time + _delaySeconds.Value;
                 return;
@@ -501,7 +338,8 @@ namespace Blackout
             _nextRescan = 0f;
             EnforceBlackout();
             PlayPowerDownSound();
-            Logger.LogInfo($"[Blackout] Power cut: {_killedLights.Count} lights killed, {_originalLightmaps.Length} lightmaps cleared, pp volume {(_ppVolume != null ? "on" : "OFF")}");
+            StartAmbience();
+            Logger.LogInfo($"[Blackout] Power cut: {_killedLights.Count} lights killed, pp volume {(_ppVolume != null ? "on" : "OFF")}");
         }
 
         private void EnforceBlackout()
@@ -558,7 +396,6 @@ namespace Blackout
                 }
             }
 
-
             ApplyGearBoost();
 
             RenderSettings.ambientIntensity = 0f;
@@ -571,6 +408,55 @@ namespace Blackout
             {
                 _colorGrading.postExposure.value = CutExposure;
             }
+
+            if (_ambienceSource != null)
+            {
+                _ambienceSource.volume = _ambienceVolume.Value;
+            }
+        }
+
+        private void ApplyGearBoost()
+        {
+            // rebase when the game changes intensity (toggles), then cancel half the exposure drop
+            // (full cancellation overdrives specular reflections)
+            var boost = Mathf.Pow(2f, -CutExposure) * 0.5f;
+            foreach (var pair in _gearLights)
+            {
+                var light = pair.Key;
+                var state = pair.Value;
+                if (light == null)
+                {
+                    continue;
+                }
+                var current = light.intensity;
+                if (Mathf.Abs(current - state.LastSet) > 0.001f)
+                {
+                    state.Baseline = current;
+                }
+                light.intensity = state.Baseline * boost;
+                state.LastSet = light.intensity;
+            }
+        }
+
+        private static bool IsGearLight(Light light)
+        {
+            if (light.name.ToLowerInvariant().Contains("muzzle"))
+            {
+                return false;
+            }
+            // the flashlight controller marks every tactical device light, pooled or not
+            if (light.GetComponentInParent<TacticalComboVisualController>() != null)
+            {
+                return true;
+            }
+            for (var t = light.transform; t != null; t = t.parent)
+            {
+                if (t.name.StartsWith("nvg_") || t.name.StartsWith("flashlight_"))
+                {
+                    return true;
+                }
+            }
+            return light.GetComponentInParent<Player>() != null;
         }
 
         private void CreatePpVolume()
@@ -578,7 +464,7 @@ namespace Blackout
             var ppLayer = FindObjectOfType<PostProcessLayer>();
             if (ppLayer == null)
             {
-                Logger.LogWarning("[Blackout] No PostProcessLayer found — exposure darkening unavailable");
+                Logger.LogWarning("[Blackout] No PostProcessLayer found, exposure darkening unavailable");
                 return;
             }
 
@@ -635,6 +521,7 @@ namespace Blackout
             RenderSettings.ambientLight = _originalAmbientLight;
             RenderSettings.reflectionIntensity = _originalReflectionIntensity;
             DestroyPpVolume();
+            StopAmbience();
 
             Logger.LogInfo("[Blackout] Power restored (mod disabled mid-raid)");
         }
@@ -664,7 +551,6 @@ namespace Blackout
                         break;
                     }
                 }
-                Logger.LogInfo($"[Blackout] Subtitle font: {(_subtitleStyle.font != null ? _subtitleStyle.font.name : "default")}");
             }
 
             _subtitleStyle.fontSize = Mathf.RoundToInt(Screen.height / 62f);
@@ -690,22 +576,31 @@ namespace Blackout
 
         private void PlayPowerDownSound()
         {
-            PlayClip(_powerDownClip);
-        }
-
-        // same call chain the labs switch intercom uses (WorldInteractiveObject.PlaySoundAtPoint)
-        private void PlayAnnouncement()
-        {
-            if (_announcerClip == null || _soundVolume.Value <= 0f)
+            if (_powerDownClip == null || _soundVolume.Value <= 0f)
             {
                 return;
             }
 
-            var gameWorld = Singleton<GameWorld>.Instance;
-            var player = gameWorld != null ? gameWorld.MainPlayer : null;
-            if (player == null || !MonoBehaviourSingleton<BetterAudio>.Instantiated)
+            var guiSounds = Singleton<EFT.UI.GUISounds>.Instance;
+            if (guiSounds != null)
             {
-                PlayClip(_announcerClip);
+                guiSounds.PlaySound(_powerDownClip, false, false, _soundVolume.Value);
+                return;
+            }
+
+            var go = new GameObject("BlackoutSound");
+            var source = go.AddComponent<AudioSource>();
+            source.spatialBlend = 0f;
+            source.volume = _soundVolume.Value;
+            source.clip = _powerDownClip;
+            source.Play();
+            Destroy(go, _powerDownClip.length + 1f);
+        }
+
+        private void PlayAnnouncement()
+        {
+            if (_announcerClip == null || _soundVolume.Value <= 0f)
+            {
                 return;
             }
 
@@ -729,30 +624,15 @@ namespace Blackout
                 return;
             }
 
-            UnityEngine.Audio.AudioMixerGroup group = null;
-            foreach (var g in Resources.FindObjectsOfTypeAll<UnityEngine.Audio.AudioMixerGroup>())
+            // no PA on this map: virtual speaker ring copied from the real speakers' profile
+            var gameWorld = Singleton<GameWorld>.Instance;
+            var player = gameWorld != null ? gameWorld.MainPlayer : null;
+            if (player == null)
             {
-                if (g != null && g.name == "CommonAmbInEffects")
-                {
-                    group = g;
-                    break;
-                }
-            }
-            if (group == null)
-            {
-                foreach (var s in FindObjectsOfType<AudioSource>())
-                {
-                    if (s != null && s.enabled && s.outputAudioMixerGroup != null)
-                    {
-                        group = s.outputAudioMixerGroup;
-                        if (s.isPlaying)
-                        {
-                            break;
-                        }
-                    }
-                }
+                return;
             }
 
+            var group = FindAmbientMixerGroup();
             var offsets = new[]
             {
                 new Vector3(40f, 4f, 12f),
@@ -783,7 +663,7 @@ namespace Blackout
         {
             var originalClip = speaker.clip;
             var originalPitch = speaker.pitch;
-            Log.LogInfo($"[Blackout] Speaker '{speaker.gameObject.name}' original pitch {originalPitch:0.000}, playing at 1.0");
+            Logger.LogInfo($"[Blackout] Speaker '{speaker.gameObject.name}' original pitch {originalPitch:0.000}, playing at 1.0");
             speaker.Stop();
             speaker.clip = _announcerClip;
             speaker.pitch = 1f;
@@ -797,115 +677,102 @@ namespace Blackout
             }
         }
 
-        private void PlayClip(AudioClip clip)
+        private void StartAmbience()
         {
-            if (clip == null || _soundVolume.Value <= 0f)
+            if (_ambienceClip == null || _ambienceVolume.Value <= 0f)
             {
                 return;
             }
 
-            var betterAudio = Singleton<BetterAudio>.Instance;
-            var gameWorld = Singleton<GameWorld>.Instance;
-            var playerPos = gameWorld?.MainPlayer != null ? gameWorld.MainPlayer.Position : Vector3.zero;
+            var go = new GameObject("BlackoutAmbience");
+            _ambienceSource = go.AddComponent<AudioSource>();
+            _ambienceSource.clip = _ambienceClip;
+            _ambienceSource.outputAudioMixerGroup = FindAmbientMixerGroup();
+            _ambienceSource.loop = true;
+            _ambienceSource.spatialBlend = 0f;
+            _ambienceSource.volume = _ambienceVolume.Value;
+            _ambienceSource.Play();
+        }
 
-            switch (_soundMethod.Value)
+        private void StopAmbience()
+        {
+            if (_ambienceSource != null)
             {
-                case SoundMethod.GuiSounds:
-                    var guiSounds = Singleton<EFT.UI.GUISounds>.Instance;
-                    if (guiSounds == null)
-                    {
-                        Logger.LogWarning("[Blackout] GUISounds unavailable, using raw 2D");
-                        goto case SoundMethod.RawAudioSource2D;
-                    }
-                    guiSounds.PlaySound(clip, false, false, _soundVolume.Value);
-                    break;
-
-                case SoundMethod.SceneMixerClone:
-                    UnityEngine.Audio.AudioMixerGroup group = null;
-                    foreach (var src in FindObjectsOfType<AudioSource>())
-                    {
-                        if (src != null && src.enabled && src.outputAudioMixerGroup != null)
-                        {
-                            group = src.outputAudioMixerGroup;
-                            if (src.isPlaying)
-                            {
-                                break; // a source that's actually playing is the best donor
-                            }
-                        }
-                    }
-                    if (group == null)
-                    {
-                        Logger.LogWarning("[Blackout] No scene AudioSource with a mixer group found, using raw 2D");
-                        goto case SoundMethod.RawAudioSource2D;
-                    }
-                    Logger.LogInfo($"[Blackout] Playing via cloned mixer group '{group.name}'");
-                    var cloneGo = new GameObject("BlackoutSound");
-                    var cloneSrc = cloneGo.AddComponent<AudioSource>();
-                    cloneSrc.outputAudioMixerGroup = group;
-                    cloneSrc.spatialBlend = 0f;
-                    cloneSrc.volume = _soundVolume.Value;
-                    cloneSrc.clip = clip;
-                    cloneSrc.Play();
-                    Destroy(cloneGo, clip.length + 1f);
-                    break;
-
-                case SoundMethod.AtPointEnvironment:
-                    if (betterAudio == null) goto case SoundMethod.RawAudioSource2D;
-                    // same playback path the Labs switch/intercom clips use (WorldInteractiveObject.PlaySoundAtPoint);
-                    // rolloff is on a distance-like scale, small values are inaudible a few meters out
-                    betterAudio.PlayAtPoint(
-                        playerPos,
-                        clip,
-                        10f,
-                        BetterAudio.AudioSourceGroupType.Environment,
-                        100,
-                        _soundVolume.Value,
-                        EOcclusionTest.None,
-                        null,
-                        false);
-                    break;
-
-                case SoundMethod.Nonspatial:
-                    if (betterAudio == null) goto case SoundMethod.RawAudioSource2D;
-                    betterAudio.PlayNonspatial(
-                        clip,
-                        BetterAudio.AudioSourceGroupType.Nonspatial,
-                        0f,
-                        _soundVolume.Value,
-                        null);
-                    break;
-
-                case SoundMethod.NonspatialBypass:
-                    if (betterAudio == null) goto case SoundMethod.RawAudioSource2D;
-                    betterAudio.PlayNonspatial(
-                        clip,
-                        BetterAudio.AudioSourceGroupType.NonspatialBypass,
-                        0f,
-                        _soundVolume.Value,
-                        null);
-                    break;
-
-                case SoundMethod.RawAudioSource2D:
-                    PlayRaw(clip, playerPos, 0f);
-                    break;
-
-                case SoundMethod.RawAudioSource3D:
-                    PlayRaw(clip, playerPos, 1f);
-                    break;
+                Destroy(_ambienceSource.gameObject);
+                _ambienceSource = null;
             }
         }
 
-        private void PlayRaw(AudioClip clip, Vector3 position, float spatialBlend)
+        private AudioMixerGroup FindAmbientMixerGroup()
         {
-            var go = new GameObject("BlackoutSound");
-            go.transform.position = position;
-            var source = go.AddComponent<AudioSource>();
-            source.spatialBlend = spatialBlend;
-            source.maxDistance = 100f;
-            source.volume = _soundVolume.Value;
-            source.clip = clip;
-            source.Play();
-            Destroy(go, clip.length + 1f);
+            // the effects ambient chain the real announcer speakers route through
+            foreach (var g in Resources.FindObjectsOfTypeAll<AudioMixerGroup>())
+            {
+                if (g != null && g.name == "CommonAmbInEffects")
+                {
+                    return g;
+                }
+            }
+            foreach (var s in FindObjectsOfType<AudioSource>())
+            {
+                if (s != null && s.enabled && s.outputAudioMixerGroup != null && s.isPlaying)
+                {
+                    return s.outputAudioMixerGroup;
+                }
+            }
+            return null;
+        }
+
+        private void LockEventDoors()
+        {
+            var wanted = new HashSet<string>(LockedDoorIds);
+            var locked = 0;
+            foreach (var door in FindObjectsOfType<EFT.Interactive.Door>())
+            {
+                if (door == null || !wanted.Contains(door.Id))
+                {
+                    continue;
+                }
+                door.KeyId = BlackoutKeyTemplateId;
+                door.DoorState = EFT.Interactive.EDoorState.Locked;
+                // scenes can leave the door physically ajar, snap the hinge to its closed angle
+                door.CurrentAngle = door.GetAngle(EFT.Interactive.EDoorState.Locked);
+                locked++;
+            }
+            Logger.LogInfo($"[Blackout] Locked {locked}/{wanted.Count} event doors");
+        }
+
+        private void InspectAimedDoor()
+        {
+            var cam = Camera.main;
+            if (cam == null)
+            {
+                return;
+            }
+            var hits = Physics.RaycastAll(cam.transform.position, cam.transform.forward, 8f);
+            Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+            EFT.Interactive.WorldInteractiveObject wio = null;
+            foreach (var h in hits)
+            {
+                var candidate = h.collider.GetComponentInParent<EFT.Interactive.WorldInteractiveObject>();
+                if (candidate != null)
+                {
+                    wio = candidate;
+                    break;
+                }
+            }
+            if (wio == null)
+            {
+                Logger.LogInfo($"[Blackout DOOR] no interactive object within 8m ({hits.Length} hits, nearest '{(hits.Length > 0 ? hits[0].collider.name : "none")}')");
+                return;
+            }
+            var path = wio.gameObject.name;
+            var t = wio.transform.parent;
+            for (var i = 0; i < 6 && t != null; i++, t = t.parent)
+            {
+                path = t.name + "/" + path;
+            }
+            Logger.LogInfo($"[Blackout DOOR] type={wio.GetType().Name} id='{wio.Id}' keyId='{wio.KeyId}' state={wio.DoorState} operatable={wio.Operatable} pos={wio.transform.position} :: {path}");
         }
 
         private void LoadSoundBundle()
@@ -928,46 +795,8 @@ namespace Blackout
 
             _powerDownClip = bundle.LoadAsset<AudioClip>("black_out_huge");
             _announcerClip = bundle.LoadAsset<AudioClip>("announcer_lights_out_01");
-            Logger.LogInfo($"[Blackout] Bundle loaded: blackout sfx {(_powerDownClip != null ? _powerDownClip.length.ToString("0.0") + "s" : "MISSING")}, announcer {(_announcerClip != null ? _announcerClip.length.ToString("0.0") + "s" : "MISSING")}");
-        }
-    }
-
-    [HarmonyPatch(typeof(BetterAudio), nameof(BetterAudio.PlayAtPoint),
-        typeof(Vector3), typeof(AudioClip), typeof(BetterAudio.AudioSourceGroupType), typeof(int),
-        typeof(float), typeof(EOcclusionTest), typeof(UnityEngine.Audio.AudioMixerGroup),
-        typeof(bool), typeof(bool), typeof(bool), typeof(bool))]
-    internal static class PlayAtPointSpy
-    {
-        private static void Postfix(BetterSource __result, Vector3 position, AudioClip clip,
-            BetterAudio.AudioSourceGroupType sourceGroup, int rolloff, float volume, bool spatialize)
-        {
-            try
-            {
-                if (clip == null || clip.length < 1.5f)
-                {
-                    return; // door creaks and footsteps are noise, voice-length clips only
-                }
-                var log = BlackoutPlugin.Log;
-                var gw = Singleton<GameWorld>.Instance;
-                var dist = gw != null && gw.MainPlayer != null ? Vector3.Distance(position, gw.MainPlayer.Position) : -1f;
-                log.LogInfo($"[Blackout SPY] PlayAtPoint clip='{clip.name}' len={clip.length:0.0}s ch={clip.channels} group={sourceGroup} rolloff={rolloff} vol={volume:0.00} spatialize={spatialize} distToPlayer={dist:0.0}m pos={position}");
-                if (__result == null)
-                {
-                    log.LogInfo("[Blackout SPY]   result: null BetterSource");
-                    return;
-                }
-                foreach (var s in __result.GetComponentsInChildren<AudioSource>(true))
-                {
-                    var mixer = s.outputAudioMixerGroup;
-                    var curve = s.GetCustomCurve(AudioSourceCurveType.CustomRolloff);
-                    var curveInfo = curve != null ? curve.length.ToString() : "none";
-                    log.LogInfo($"[Blackout SPY]   src '{s.gameObject.name}': vol={s.volume:0.00} pitch={s.pitch:0.00} blend={s.spatialBlend:0.00} spatialize={s.spatialize} spatializePost={s.spatializePostEffects} min={s.minDistance:0.0} max={s.maxDistance:0.0} rolloffMode={s.rolloffMode} curveKeys={curveInfo} prio={s.priority} reverb={s.reverbZoneMix:0.00} doppler={s.dopplerLevel:0.00} spread={s.spread:0.0} bypassFx={s.bypassEffects}/{s.bypassListenerEffects}/{s.bypassReverbZones} mixer={(mixer != null ? mixer.audioMixer.name + "/" + mixer.name : "none")}");
-                }
-            }
-            catch (Exception ex)
-            {
-                BlackoutPlugin.Log.LogWarning($"[Blackout SPY] {ex.Message}");
-            }
+            _ambienceClip = bundle.LoadAsset<AudioClip>("amb_dark_lab");
+            Logger.LogInfo($"[Blackout] Bundle loaded: blackout sfx {(_powerDownClip != null ? "ok" : "MISSING")}, announcer {(_announcerClip != null ? "ok" : "MISSING")}, ambience {(_ambienceClip != null ? "ok" : "MISSING")}");
         }
     }
 }
