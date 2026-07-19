@@ -12,3 +12,5 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 - The event's dark ambience loop after the cut, volume configurable
 - Admin's key recreated 1:1 from the live event (real item id, name and description) via a new server-side component
 - First lockdown door: the Labs medical corridor door starts locked and closed, opened by the Admin's key
+- Extract lockdown: only Parking Gate and Hangar Gate remain live - every other extract is disabled, its activation consoles dead, and its row hidden from the extract list
+- The extraction switch in the admin office, recreated from the live event's own scene data: same trigger position, same boiler control panel on the wall, one press activates both gates

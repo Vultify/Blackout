@@ -29,6 +29,14 @@ namespace Blackout
             "door_Laboratory_Medical_corridor_floor_1_00006",
         };
 
+        // the live event's Exit_Switch trigger pose and its Boiler_Control_Panel_A wall
+        // prop, both read from the live 1.0.6.5 scene files
+        private const string AdminSwitchId = "blackout_admin_switch";
+        private static readonly Vector3 AdminSwitchPos = new Vector3(-130.899f, 1.404f, -336.423f);
+        private static readonly Vector3 AdminPanelPos = new Vector3(-130.749f, 1.052f, -336.428f);
+        private static readonly Quaternion AdminPanelRot = new Quaternion(-0.5f, 0.5f, 0.5f, 0.5f);
+        private const string AdminPanelDonorName = "Boiler_Control_Panel_A";
+
         private ConfigEntry<bool> _modEnabled;
         private ConfigEntry<bool> _labsOnly;
         private ConfigEntry<float> _delaySeconds;
@@ -45,6 +53,8 @@ namespace Blackout
         private bool _exfilsDumped;
         private bool _lockdownApplied;
         private bool _exfilRowsHidden;
+        private bool _adminSwitchSpawned;
+        private bool _gatesActivated;
         private bool _statusStarted;
         private Vector3 _startPos;
         private Vector2 _startLook;
@@ -217,6 +227,8 @@ namespace Blackout
                     _exfilsDumped = false;
                     _lockdownApplied = false;
                     _exfilRowsHidden = false;
+                    _adminSwitchSpawned = false;
+                    _gatesActivated = false;
                     _statusStarted = false;
                     _clockStarted = false;
                     _blackoutActive = false;
@@ -255,6 +267,11 @@ namespace Blackout
             if (_lockdownApplied && !_exfilRowsHidden)
             {
                 _exfilRowsHidden = HideDisabledExfilRows();
+            }
+
+            if (_lockdownApplied && !_adminSwitchSpawned)
+            {
+                _adminSwitchSpawned = SpawnAdminSwitch();
             }
 
             if (_inspectDoorKey.Value.IsDown())
@@ -878,6 +895,155 @@ namespace Blackout
             }
             Logger.LogInfo($"[Blackout] Hid {hidden} disabled extract rows");
             return true;
+        }
+
+        // the event's extraction switch: a clone of the parking gate console mounted in the
+        // admin office, one flip activates both gates
+        private bool SpawnAdminSwitch()
+        {
+            var controller = ExfiltrationControllerClass.Instance;
+            if (controller == null || controller.ExfiltrationPoints == null
+                || controller.ExfiltrationPoints.Length == 0)
+            {
+                return false;
+            }
+
+            EFT.Interactive.Switch donor = null;
+            foreach (var point in controller.ExfiltrationPoints)
+            {
+                if (point != null && point.Settings != null
+                    && point.Settings.Name == "lab_Parking_Gate" && point.Switch != null)
+                {
+                    donor = point.Switch;
+                    break;
+                }
+            }
+            if (donor == null)
+            {
+                Logger.LogWarning("[Blackout] Parking gate console not found, no admin switch");
+                return true;
+            }
+
+            var go = Instantiate(donor.gameObject);
+            go.name = AdminSwitchId;
+            go.transform.position = AdminSwitchPos;
+            go.transform.rotation = Quaternion.identity;
+
+            var sw = go.GetComponent<EFT.Interactive.Switch>();
+            sw.Id = AdminSwitchId;
+            // stand-alone: no exfil, door, or switch chain of its own - we do the wiring
+            sw.ExfiltrationPoint = null;
+            sw.Door = null;
+            sw.NextSwitches = Array.Empty<EFT.Interactive.Switch.SwitchAndOperation>();
+            sw.PreviousSwitch = null;
+            sw.AutoTurnOff = false;
+            sw.DoorState = EFT.Interactive.EDoorState.Shut;
+            sw.Operatable = true;
+            sw.OnDoorStateChanged += OnAdminSwitchStateChanged;
+            go.SetActive(true);
+
+            // visible body: live mounts a Boiler_Control_Panel_A prop here - clone the real
+            // one already loaded elsewhere in the map, at the live pose (real shader/material)
+            var panelDonor = GameObject.Find(AdminPanelDonorName);
+            if (panelDonor != null)
+            {
+                var panel = Instantiate(panelDonor, go.transform);
+                panel.name = "blackout_admin_panel";
+                panel.transform.position = AdminPanelPos;
+                panel.transform.rotation = AdminPanelRot;
+                panel.transform.localScale = new Vector3(0.7f, 0.7f, 0.7f);
+                panel.SetActive(true);
+                // the donor's LODGroup was cloned mid-cull and can keep the renderers hidden
+                var lodGroup = panel.GetComponentInChildren<LODGroup>(true);
+                if (lodGroup != null)
+                {
+                    Destroy(lodGroup);
+                }
+                foreach (var rend in panel.GetComponentsInChildren<Renderer>(true))
+                {
+                    if (!rend.gameObject.name.Contains("SHADOW"))
+                    {
+                        rend.enabled = true;
+                        rend.forceRenderingOff = false;
+                    }
+                    Logger.LogInfo($"[Blackout] panel renderer '{rend.gameObject.name}' bounds center={rend.bounds.center} size={rend.bounds.size}");
+                }
+                // if the visible mesh ended up inside the wall (x beyond the wall face),
+                // the live rotation read mirrored - swing it back out
+                var lod0 = panel.GetComponentsInChildren<Renderer>(true);
+                foreach (var rend in lod0)
+                {
+                    if (!rend.gameObject.name.Contains("SHADOW") && rend.bounds.center.x > -130.74f)
+                    {
+                        panel.transform.rotation = Quaternion.AngleAxis(180f, Vector3.up) * AdminPanelRot;
+                        Logger.LogInfo("[Blackout] panel was inside the wall, flipped 180");
+                        break;
+                    }
+                }
+                Logger.LogInfo("[Blackout] Boiler control panel cloned onto the admin wall");
+            }
+            else
+            {
+                Logger.LogWarning("[Blackout] Boiler_Control_Panel_A not found in scene, switch stays invisible");
+            }
+
+            var col = go.GetComponentInChildren<Collider>(true);
+            Logger.LogInfo($"[Blackout] Admin switch spawned at {go.transform.position} (donor '{donor.gameObject.name}', renderers={go.GetComponentsInChildren<Renderer>(true).Length}, collider {(col != null ? col.name : "MISSING")})");
+            return true;
+        }
+
+        private void OnAdminSwitchStateChanged(EFT.Interactive.WorldInteractiveObject obj,
+            EFT.Interactive.EDoorState prev, EFT.Interactive.EDoorState next)
+        {
+            if (next != EFT.Interactive.EDoorState.Open || _gatesActivated)
+            {
+                return;
+            }
+            _gatesActivated = true;
+            ActivateGates();
+        }
+
+        private void ActivateGates()
+        {
+            var controller = ExfiltrationControllerClass.Instance;
+            if (controller == null || controller.ExfiltrationPoints == null)
+            {
+                return;
+            }
+            foreach (var point in controller.ExfiltrationPoints)
+            {
+                if (point == null || point.Settings == null)
+                {
+                    continue;
+                }
+                var name = point.Settings.Name;
+                if (name != "lab_Parking_Gate" && name != "lab_Hangar_Gate")
+                {
+                    continue;
+                }
+                try
+                {
+                    var sw = point.Switch;
+                    if (sw != null && sw.DoorState == EFT.Interactive.EDoorState.Shut)
+                    {
+                        // the game's own remote-flip pattern (Switch.NextSwitches): runs the
+                        // full vanilla path - console animation, gate door, alarm
+                        sw.LockForInteraction();
+                        sw.Interact(new EFT.Interactive.InteractionResult(EInteractionType.Open));
+                    }
+                    // the console's status write is gated on ConditionStatus, which our
+                    // lockdown state may not satisfy - set it directly as well
+                    var target = sw != null
+                        ? sw.TargetStatus
+                        : EFT.Interactive.EExfiltrationStatus.RegularMode;
+                    point.ExternalSetStatus(target);
+                    Logger.LogInfo($"[Blackout] Gate activated: {name} -> {target}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning($"[Blackout] Gate activation failed for {name}: {ex.Message}");
+                }
+            }
         }
 
         private void InspectAimedDoor()
