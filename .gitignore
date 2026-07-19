@@ -10,3 +10,7 @@ build.bat
 docs/
 extracted/
 sounds/
+
+# embedded build inputs, required to compile
+!Blackout/marker_digits.png
+!Blackout/board_overlay.png

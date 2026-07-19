@@ -14,5 +14,9 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 - First lockdown door: the Labs medical corridor door starts locked and closed, opened by the Admin's key
 - Extract lockdown: only Parking Gate and Hangar Gate remain live - every other extract is disabled, its activation consoles dead, and its row hidden from the extract list
 - The extraction switch in the admin office, recreated from the live event's own scene data: same trigger position, same boiler control panel on the wall, one press activates both gates
+- The live event's amber emergency floods, spawned at the real dark-scene siren positions near the gates, brightness configurable
+- Labs' keycard blinkers and door-status LEDs stay alive and script-driven during the blackout, like the live event keeps them
+- Ambient Level slider - 0 is live-event black, nudge it up for a hint of visibility
+- The admin office whiteboard from the live event, cloned at the real event pose, with a fresh 4-digit emergency code handwritten on it every raid plus the live board's own markings
 ### Changed
-- Real darkness instead of a camera trick: the map's light scene is dropped the way the live dark preset does it, fixtures and emissive surfaces (sky ceiling, lamp glass, LED panels) go physically dark, and the screen-wide exposure cut is gone - flashlights now just work, no compensation needed
+- Real darkness instead of a camera trick: the map's light scene is dropped the way the live dark preset does it, fixtures and emissive surfaces (sky ceiling, lamp glass, LED panels) go physically dark, the map's own ambient lighting channels are taken over at the source, and the screen-wide exposure cut is gone - flashlights now just work, no compensation needed

@@ -9,6 +9,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="marker_digits.png" LogicalName="Blackout.marker_digits.png" />
+    <EmbeddedResource Include="board_overlay.png" LogicalName="Blackout.board_overlay.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(SPT_PATH)\EscapeFromTarkov_Data\Managed\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Assembly-CSharp">
       <HintPath>$(SPT_PATH)\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll</HintPath>
       <Private>false</Private>

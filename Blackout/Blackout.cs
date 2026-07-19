@@ -34,6 +34,12 @@ namespace Blackout
         private static readonly Quaternion AdminPanelRot = new Quaternion(-0.5f, 0.5f, 0.5f, 0.5f);
         private const string AdminPanelDonorName = "Boiler_Control_Panel_A";
 
+        // live 1.0.6.5 added a Marker_Board_B to the admin room's base scene (live level79) at
+        // this exact pose - SPT lacks the instance but ships the prop, so it clones like the panel
+        private const string WhiteboardDonorName = "Marker_Board_B";
+        private static readonly Vector3 WhiteboardPos = new Vector3(-135.766f, 0.119f, -335.513f);
+        private static readonly Quaternion WhiteboardRot = new Quaternion(-0.5f, -0.5f, -0.5f, 0.5f);
+
         private ConfigEntry<bool> _modEnabled;
         private ConfigEntry<bool> _labsOnly;
         private ConfigEntry<float> _delaySeconds;
@@ -111,6 +117,10 @@ namespace Blackout
         private readonly HashSet<Light> _reportedRelights = new HashSet<Light>();
         private bool _isLabs;
         private readonly List<Light> _emergencyLights = new List<Light>();
+
+        private bool _whiteboardSpawned;
+        private GameObject _whiteboard;
+        private string _raidCode;
 
         private bool _ambientKilled;
         private Color _origAmbSky;
@@ -244,6 +254,14 @@ namespace Blackout
                     _lockdownApplied = false;
                     _exfilRowsHidden = false;
                     _adminSwitchSpawned = false;
+                    _whiteboardSpawned = false;
+                    _whiteboard = null;
+                    _raidCode = null;
+                    if (_boardRt != null)
+                    {
+                        _boardRt.Release();
+                        _boardRt = null;
+                    }
                     _gatesActivated = false;
                     _statusStarted = false;
                     _clockStarted = false;
@@ -297,6 +315,11 @@ namespace Blackout
             if (_lockdownApplied && !_adminSwitchSpawned)
             {
                 _adminSwitchSpawned = SpawnAdminSwitch();
+            }
+
+            if (_adminSwitchSpawned && !_whiteboardSpawned)
+            {
+                _whiteboardSpawned = SpawnWhiteboard();
             }
 
             if (_inspectDoorKey.Value.IsDown())
@@ -1314,6 +1337,202 @@ namespace Blackout
             var col = go.GetComponentInChildren<Collider>(true);
             Logger.LogInfo($"[Blackout] Admin switch spawned at {go.transform.position} (donor '{donor.gameObject.name}', renderers={go.GetComponentsInChildren<Renderer>(true).Length}, collider {(col != null ? col.name : "MISSING")})");
             return true;
+        }
+
+        // the raid's emergency code lives on the admin room whiteboard, at the live event's own
+        // board pose - rolled fresh every raid; step 2 wires the keypad doors to check against it
+        private bool SpawnWhiteboard()
+        {
+            _raidCode = UnityEngine.Random.Range(0, 10000).ToString("D4");
+
+            var donor = GameObject.Find(WhiteboardDonorName);
+            if (donor == null)
+            {
+                Logger.LogWarning("[Blackout] Marker_Board_B not found in scene, code stays log-only");
+                Logger.LogInfo($"[Blackout] raid code {_raidCode}");
+                return true;
+            }
+
+            _whiteboard = Instantiate(donor);
+            _whiteboard.name = "blackout_whiteboard";
+            _whiteboard.transform.position = WhiteboardPos;
+            _whiteboard.transform.rotation = WhiteboardRot;
+            _whiteboard.transform.localScale = Vector3.one;
+            var lodGroup = _whiteboard.GetComponentInChildren<LODGroup>(true);
+            if (lodGroup != null)
+            {
+                Destroy(lodGroup);
+            }
+            Bounds bounds = default;
+            var hasBounds = false;
+            Renderer lod0 = null;
+            foreach (var rend in _whiteboard.GetComponentsInChildren<Renderer>(true))
+            {
+                var name = rend.gameObject.name;
+                // LOD0 only - with the LODGroup gone, an enabled LOD1 z-fights over the
+                // detailed mesh and flattens the board's corner mounts and frame
+                if (name.Contains("SHADOW") || name.Contains("LOD1"))
+                {
+                    rend.enabled = false;
+                    continue;
+                }
+                rend.enabled = true;
+                rend.forceRenderingOff = false;
+                if (name.Contains("LOD0"))
+                {
+                    lod0 = rend;
+                }
+                if (!hasBounds)
+                {
+                    bounds = rend.bounds;
+                    hasBounds = true;
+                }
+                else
+                {
+                    bounds.Encapsulate(rend.bounds);
+                }
+                Logger.LogInfo($"[Blackout] whiteboard renderer '{name}' bounds center={rend.bounds.center} size={rend.bounds.size}");
+            }
+            _whiteboard.SetActive(true);
+
+            // wall plane is YZ at x~-135.8, board face toward the room (+X); mirrored-read trap
+            // like the panel: a mesh sunk past the wall means the rotation needs the 180 swing
+            if (hasBounds && bounds.center.x < -135.9f)
+            {
+                _whiteboard.transform.rotation = Quaternion.AngleAxis(180f, Vector3.up) * WhiteboardRot;
+                Logger.LogInfo("[Blackout] whiteboard was inside the wall, flipped 180");
+            }
+
+            BakeCodeOntoBoard(lod0);
+            Logger.LogInfo($"[Blackout] whiteboard spawned at {WhiteboardPos}, raid code {_raidCode}");
+            return true;
+        }
+
+        // the code is baked into a copy of the board's own texture, so the ink is part of the
+        // lit surface - black under any lighting, NVG included, and it cannot show through
+        // walls. Board-local -> UV mapping measured from Marker_Board_B_LOD0's mesh:
+        //   u = 0.4895 - 0.4334 * localX      (u runs opposite local x)
+        //   v = 0.9933 - 0.4313 * (localZ - 0.892)   (v runs top-down; localZ is board height)
+        private RenderTexture _boardRt;
+
+        private void BakeCodeOntoBoard(Renderer lod0)
+        {
+            var atlas = LoadDigitAtlas();
+            if (atlas == null || lod0 == null)
+            {
+                Logger.LogWarning("[Blackout] no digit atlas or LOD0 renderer, code stays log-only");
+                return;
+            }
+
+            // the writing-surface material is the one sampling the board texture
+            Material boardMat = null;
+            foreach (var mat in lod0.materials)
+            {
+                var tex = mat != null ? mat.mainTexture : null;
+                Logger.LogInfo($"[Blackout] board material '{(mat != null ? mat.name : "null")}' tex '{(tex != null ? tex.name : "none")}'");
+                if (tex != null && tex.name.ToLowerInvariant().Contains("board"))
+                {
+                    boardMat = mat;
+                }
+            }
+            if (boardMat == null && lod0.materials.Length > 0)
+            {
+                boardMat = lod0.materials[0];
+            }
+            if (boardMat == null || boardMat.mainTexture == null)
+            {
+                Logger.LogWarning("[Blackout] board material/texture not found, code stays log-only");
+                return;
+            }
+
+            var guiShader = Shader.Find("Hidden/Internal-GUITexture");
+            if (guiShader == null)
+            {
+                Logger.LogWarning("[Blackout] GUI blit shader missing, code stays log-only");
+                return;
+            }
+
+            var src = boardMat.mainTexture;
+            _boardRt = new RenderTexture(src.width, src.height, 0, RenderTextureFormat.ARGB32);
+            Graphics.Blit(src, _boardRt);
+
+            var blitMat = new Material(guiShader) { mainTexture = atlas };
+            var prev = RenderTexture.active;
+            RenderTexture.active = _boardRt;
+            GL.PushMatrix();
+            GL.LoadOrtho();
+
+            // the live board's other markings (tic-tac-toe games, notes) are also drawn at
+            // runtime - live ships the same clean texture SPT does. One overlay pass across
+            // the writing surface (u 0.0116..0.9673, v 0.3135..0.9933), code area left blank
+            var overlay = LoadEmbeddedTexture("Blackout.board_overlay.png");
+            if (overlay != null)
+            {
+                var overlayMat = new Material(guiShader) { mainTexture = overlay };
+                overlayMat.SetPass(0);
+                GL.Begin(GL.QUADS);
+                GL.Color(Color.white);
+                GL.TexCoord2(0f, 1f); GL.Vertex3(0.0116f, 0.3135f, 0f);
+                GL.TexCoord2(1f, 1f); GL.Vertex3(0.9673f, 0.3135f, 0f);
+                GL.TexCoord2(1f, 0f); GL.Vertex3(0.9673f, 0.9933f, 0f);
+                GL.TexCoord2(0f, 0f); GL.Vertex3(0.0116f, 0.9933f, 0f);
+                GL.End();
+            }
+
+            blitMat.SetPass(0);
+
+            // code sits on the viewer's right half of the board like the live one - viewer
+            // right is local -x; digit ~0.14m wide, 0.21m tall, at ~62% board height
+            const float digitW = 0.14f * 0.4334f;
+            const float digitH = 0.21f * 0.4313f;
+            const float startX = -0.11f;
+            const float stepX = -0.17f;
+            const float boardZ = 1.87f;
+            GL.Begin(GL.QUADS);
+            GL.Color(Color.white);
+            for (var i = 0; i < _raidCode.Length; i++)
+            {
+                var digit = _raidCode[i] - '0';
+                var u = 0.4895f - 0.4334f * (startX + stepX * i);
+                var v = 0.9933f - 0.4313f * (boardZ - 0.892f);
+                var au0 = digit / 10f;
+                var au1 = (digit + 1) / 10f;
+
+                // board art is stored v-flipped (v grows toward the board's bottom), so the
+                // glyph's atlas v is flipped to land upright on the rendered board
+                GL.TexCoord2(au0, 1f); GL.Vertex3(u - digitW / 2f, v - digitH / 2f, 0f);
+                GL.TexCoord2(au1, 1f); GL.Vertex3(u + digitW / 2f, v - digitH / 2f, 0f);
+                GL.TexCoord2(au1, 0f); GL.Vertex3(u + digitW / 2f, v + digitH / 2f, 0f);
+                GL.TexCoord2(au0, 0f); GL.Vertex3(u - digitW / 2f, v + digitH / 2f, 0f);
+            }
+            GL.End();
+            GL.PopMatrix();
+            RenderTexture.active = prev;
+
+            boardMat.mainTexture = _boardRt;
+            Logger.LogInfo($"[Blackout] code baked onto board texture ({src.width}x{src.height})");
+        }
+
+        private Texture2D LoadDigitAtlas() => LoadEmbeddedTexture("Blackout.marker_digits.png");
+
+        private static Texture2D LoadEmbeddedTexture(string resource)
+        {
+            using (var stream = typeof(BlackoutPlugin).Assembly.GetManifestResourceStream(resource))
+            {
+                if (stream == null)
+                {
+                    return null;
+                }
+                var bytes = new byte[stream.Length];
+                stream.Read(bytes, 0, bytes.Length);
+                var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                if (!ImageConversion.LoadImage(tex, bytes))
+                {
+                    return null;
+                }
+                tex.name = resource;
+                return tex;
+            }
         }
 
         private void OnAdminSwitchStateChanged(EFT.Interactive.WorldInteractiveObject obj,
