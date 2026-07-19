@@ -6,6 +6,8 @@ Mirrors the live EFT "Blackout" event on The Lab: seconds into the raid the gene
 
 ## Structure
 
-- `Blackout/` — client BepInEx plugin
+- `Blackout/` — client BepInEx plugin (darkness, sounds, door locks)
+- `BlackoutServer/` — server mod (event items like the Admin's key)
+- `blackout_sounds.bundle` — the live event's audio, extracted and repacked
 
 See [CHANGELOG.md](CHANGELOG.md) for progress.
