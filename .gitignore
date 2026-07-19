@@ -14,3 +14,4 @@ sounds/
 # embedded build inputs, required to compile
 !Blackout/marker_digits.png
 !Blackout/board_overlay.png
+!Blackout/keypad/*.png

@@ -122,6 +122,13 @@ namespace Blackout
         private GameObject _whiteboard;
         private string _raidCode;
 
+        internal static BlackoutPlugin Instance;
+        private EFT.Interactive.KeycardDoor _keypadDoor;
+        private string _keypadEntry = "";
+        private float _keypadResultUntil;
+        private bool _keypadGranted;
+        private bool _keypadPatched;
+
         private bool _ambientKilled;
         private Color _origAmbSky;
         private Color _origAmbEquator;
@@ -136,6 +143,7 @@ namespace Blackout
 
         private void Awake()
         {
+            Instance = this;
             _modEnabled = Config.Bind(
                 "1. General",
                 "Enable Mod",
@@ -221,6 +229,362 @@ namespace Blackout
                 "Aim at a door and press to log its scene Id, key requirement and state - used to pick doors for the lock feature");
 
             LoadSoundBundle();
+
+            try
+            {
+                new KeycardActionsPatch().Enable();
+                _keypadPatched = true;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[Blackout] keypad patch failed, keycard doors stay vanilla: {ex.Message}");
+            }
+        }
+
+        // during the blackout, aiming at a Labs card reader offers the emergency code keypad
+        // instead of keycard swipes - the live event's PasscodeTerminal, rebuilt on 0.16.9
+        private class KeycardActionsPatch : SPT.Reflection.Patching.ModulePatch
+        {
+            protected override MethodBase GetTargetMethod()
+            {
+                return typeof(GetActionsClass).GetMethod("smethod_13",
+                    BindingFlags.Public | BindingFlags.Static);
+            }
+
+            [SPT.Reflection.Patching.PatchPostfix]
+            private static void Postfix(ref ActionsReturnClass __result,
+                GamePlayerOwner owner, EFT.Interactive.KeycardDoor door, bool isProxy)
+            {
+                var plugin = Instance;
+                if (plugin == null || !plugin._blackoutActive || !plugin._isLabs
+                    || plugin._raidCode == null || !isProxy
+                    || door.DoorState != EFT.Interactive.EDoorState.Locked)
+                {
+                    return;
+                }
+
+                __result = new ActionsReturnClass
+                {
+                    Actions = new List<ActionsTypesClass>
+                    {
+                        new ActionsTypesClass
+                        {
+                            Name = "Enter emergency code",
+                            Action = () => plugin.OpenKeypad(door),
+                            Disabled = !door.Operatable,
+                        },
+                    },
+                };
+            }
+        }
+
+        private void OpenKeypad(EFT.Interactive.KeycardDoor door)
+        {
+            _keypadDoor = door;
+            _keypadEntry = "";
+            _keypadResultUntil = 0f;
+            _keypadGranted = false;
+            GamePlayerOwner.SetIgnoreInput(true);
+            // the game re-hides the cursor every frame; onBeforeRender runs after all script
+            // updates, so this write wins and the cursor stays solid instead of blinking
+            Application.onBeforeRender += EnforceKeypadCursor;
+        }
+
+        private void CloseKeypad()
+        {
+            if (_keypadDoor == null)
+            {
+                return;
+            }
+            _keypadDoor = null;
+            Application.onBeforeRender -= EnforceKeypadCursor;
+            GamePlayerOwner.SetIgnoreInput(false);
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+        }
+
+        private void EnforceKeypadCursor()
+        {
+            if (_keypadDoor == null)
+            {
+                return;
+            }
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+        }
+
+        private void SubmitKeypad()
+        {
+            if (_keypadDoor == null || _keypadEntry.Length != 4)
+            {
+                return;
+            }
+            if (_keypadEntry == _raidCode)
+            {
+                _keypadGranted = true;
+                _keypadResultUntil = Time.unscaledTime + 0.8f;
+                // no beep of our own - UnlockCoroutine's success path already plays it
+                _keypadDoor.Unlock();
+                Logger.LogInfo($"[Blackout] correct code entered, '{_keypadDoor.Id}' unlocked");
+            }
+            else
+            {
+                _keypadGranted = false;
+                _keypadResultUntil = Time.unscaledTime + 0.8f;
+                PlayDoorBeep(_keypadDoor.DeniedBeep);
+                StartCoroutine(BlinkWrongFlicker(_keypadDoor));
+                _keypadEntry = "";
+            }
+        }
+
+        private void PlayDoorBeep(AudioClip clip)
+        {
+            if (clip == null || _keypadDoor == null)
+            {
+                return;
+            }
+            var audio = Singleton<BetterAudio>.Instance;
+            if (audio != null)
+            {
+                audio.PlayAtPoint(_keypadDoor.transform.position, clip, 25f,
+                    BetterAudio.AudioSourceGroupType.Environment, 100, 1f,
+                    EOcclusionTest.None, null, false);
+            }
+        }
+
+        // the live event's wrong-code feedback: the reader's own red LED flickers
+        private IEnumerator BlinkWrongFlicker(EFT.Interactive.KeycardDoor door)
+        {
+            var lights = new List<Light>();
+            if (door.Proxies != null)
+            {
+                foreach (var proxy in door.Proxies)
+                {
+                    if (proxy == null)
+                    {
+                        continue;
+                    }
+                    foreach (var light in proxy.GetComponentsInChildren<Light>(true))
+                    {
+                        if (light.name.ToLowerInvariant().Contains("wrong_flicker"))
+                        {
+                            lights.Add(light);
+                        }
+                    }
+                }
+            }
+            for (var blink = 0; blink < 4; blink++)
+            {
+                foreach (var light in lights)
+                {
+                    light.enabled = true;
+                    light.intensity = 2f;
+                }
+                yield return new WaitForSeconds(0.1f);
+                foreach (var light in lights)
+                {
+                    light.enabled = false;
+                }
+                yield return new WaitForSeconds(0.08f);
+            }
+        }
+
+        private void KeypadGui()
+        {
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+
+            var e = Event.current;
+            if (e.type == EventType.KeyDown)
+            {
+                if (e.keyCode == KeyCode.Escape)
+                {
+                    CloseKeypad();
+                    e.Use();
+                    return;
+                }
+                if (e.keyCode == KeyCode.Backspace && _keypadEntry.Length > 0)
+                {
+                    _keypadEntry = _keypadEntry.Substring(0, _keypadEntry.Length - 1);
+                    e.Use();
+                }
+                else if ((e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter))
+                {
+                    SubmitKeypad();
+                    e.Use();
+                }
+                else if (e.character >= '0' && e.character <= '9' && _keypadEntry.Length < 4
+                    && Time.unscaledTime >= _keypadResultUntil)
+                {
+                    _keypadEntry += e.character;
+                    e.Use();
+                }
+            }
+
+            // the live PasscodeInputPanel (GameUIScene level46), drawn with its own ripped
+            // sprites at its exact geometry: panel 224x229 bottom-center (center 150px above
+            // the screen bottom), seven 28x50 slots at 28px pitch, 40x28 keys on a 48/32
+            // grid. All sprites are authored at 2x these layout units. 1080p-reference scale
+            var s = Screen.height / 1080f;
+            const float panelW = 224f;
+            const float panelH = 229f;
+            var px = (Screen.width - panelW * s) / 2f;
+            var py = Screen.height - 264.5f * s;
+            var panelCx = px + panelW * s / 2f;
+            var showResult = Time.unscaledTime < _keypadResultUntil;
+
+            EnsureKeypadStyles();
+
+            // shadow sticks out 15 units on every side (Shadow: stretch anchors, sizeDelta 30)
+            DrawKeypadTex("Background_Shadow", new Rect(px - 15f * s, py - 15f * s, (panelW + 30f) * s, (panelH + 30f) * s), 1f);
+            DrawKeypadTex("Background", new Rect(px, py, panelW * s, panelH * s), 1f);
+
+            // display substrate 214x52 centered 31 below panel top; result swaps the art
+            var subRect = new Rect(panelCx - 107f * s, py + 5f * s, 214f * s, 52f * s);
+            DrawKeypadTex(showResult ? (_keypadGranted ? "Substrate_Green" : "Substrate_Red") : "Substrate_Gray", subRect, 1f);
+            if (showResult)
+            {
+                // the big Light flash under the strip, fading out over the result window
+                var fade = Mathf.Clamp01((_keypadResultUntil - Time.unscaledTime) / 0.8f);
+                var lightRect = new Rect(panelCx - 150f * s, subRect.y + subRect.height / 2f + (84f - 74f) * s, 300f * s, 148f * s);
+                DrawKeypadTex(_keypadGranted ? "Light_Green" : "Light_Red", lightRect, fade);
+                DrawKeypadTex(_keypadGranted ? "Flashing_Green" : "Flashing_Red", subRect, fade);
+            }
+
+            // seven digit slots at 28px pitch (holder 220 wide, first slot center x=26)
+            var holderLeft = panelCx - 110f * s;
+            var holderTop = py + 2.5f * s;
+            _keypadSlotStyle.fontSize = Mathf.RoundToInt(30f * s);
+            for (var slot = 0; slot < 7; slot++)
+            {
+                var cx = holderLeft + (26f + 28f * slot) * s;
+                var cy = holderTop + 28f * s;
+                DrawKeypadTex("Number_Enter", new Rect(cx - 14f * s, cy - 14.5f * s, 28f * s, 39f * s), 1f);
+
+                var typed = slot < _keypadEntry.Length;
+                _keypadSlotStyle.normal.textColor = showResult
+                    ? (_keypadGranted ? new Color(0.65f, 1f, 0.65f) : new Color(1f, 0.5f, 0.5f))
+                    : (typed ? new Color(0.9f, 0.94f, 1f) : new Color(0.3f, 0.33f, 0.37f));
+                GUI.Label(new Rect(cx - 14f * s, cy - 25f * s, 28f * s, 50f * s),
+                    typed ? _keypadEntry[slot].ToString() : "0", _keypadSlotStyle);
+            }
+
+            if (_keypadGranted && !showResult)
+            {
+                CloseKeypad();
+                return;
+            }
+
+            // 3x4 key grid: holder center 26 below panel center; keys 40x28, visuals 42x30
+            var keys = new[] { "1", "2", "3", "4", "5", "6", "7", "8", "9", "X", "0", "E" };
+            var gridLeft = panelCx - 70f * s;
+            var gridTop = py + (114.5f + 26f - 65f) * s;
+            _keypadButtonStyle.fontSize = Mathf.RoundToInt(17f * s);
+            var mouse = Event.current.mousePosition;
+            for (var i = 0; i < keys.Length; i++)
+            {
+                var col = i % 3;
+                var row = i / 3;
+                var bcx = gridLeft + (22f + 48f * col) * s;
+                var bcy = gridTop + (17f + 32f * row) * s;
+                var hitRect = new Rect(bcx - 20f * s, bcy - 14f * s, 40f * s, 28f * s);
+                var visRect = new Rect(bcx - 21f * s, bcy - 15f * s, 42f * s, 30f * s);
+
+                DrawKeypadTex(hitRect.Contains(mouse) ? "Button_Highlighted" : "Button_Normal", visRect, 1f);
+                if (keys[i] == "X")
+                {
+                    DrawKeypadTex("Icon_Del_Static", new Rect(bcx - 7.5f * s, bcy - 8.5f * s, 15f * s, 17f * s), 1f);
+                }
+                else if (keys[i] == "E")
+                {
+                    DrawKeypadTex("Icon_Enter_Static", new Rect(bcx - 9.5f * s, bcy - 9.5f * s, 19f * s, 19f * s), 1f);
+                }
+                else
+                {
+                    GUI.Label(hitRect, keys[i], _keypadButtonStyle);
+                }
+
+                if (!GUI.Button(hitRect, GUIContent.none, GUIStyle.none))
+                {
+                    continue;
+                }
+                if (keys[i] == "X")
+                {
+                    if (_keypadEntry.Length > 0)
+                    {
+                        _keypadEntry = "";
+                    }
+                    else
+                    {
+                        CloseKeypad();
+                    }
+                }
+                else if (keys[i] == "E")
+                {
+                    SubmitKeypad();
+                }
+                else if (_keypadEntry.Length < 4 && Time.unscaledTime >= _keypadResultUntil)
+                {
+                    _keypadEntry += keys[i];
+                }
+            }
+        }
+
+        private GUIStyle _keypadSlotStyle;
+        private GUIStyle _keypadButtonStyle;
+        private Dictionary<string, Texture2D> _keypadTex;
+
+        private void DrawKeypadTex(string name, Rect rect, float alpha)
+        {
+            if (!_keypadTex.TryGetValue(name, out var tex) || tex == null)
+            {
+                return;
+            }
+            GUI.color = new Color(1f, 1f, 1f, alpha);
+            GUI.DrawTexture(rect, tex, ScaleMode.StretchToFill, true);
+            GUI.color = Color.white;
+        }
+
+        private void EnsureKeypadStyles()
+        {
+            if (_keypadSlotStyle != null)
+            {
+                return;
+            }
+            _keypadTex = new Dictionary<string, Texture2D>();
+            foreach (var name in new[]
+            {
+                "Background", "Background_Shadow", "Substrate_Gray", "Substrate_Red",
+                "Substrate_Green", "Flashing_Red", "Flashing_Green", "Light_Red",
+                "Light_Green", "Button_Normal", "Button_Highlighted", "Button_Disabled",
+                "Icon_Del_Static", "Icon_Enter_Static", "Number_Enter",
+            })
+            {
+                _keypadTex[name] = LoadEmbeddedTexture($"Blackout.keypad.{name}.png");
+            }
+            _keypadSlotStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 30,
+                alignment = TextAnchor.MiddleCenter,
+            };
+            _keypadButtonStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 17,
+                alignment = TextAnchor.MiddleCenter,
+            };
+            _keypadButtonStyle.normal.textColor = new Color(0.87f, 0.9f, 0.93f);
+
+            // live renders in bender; the game ships it as a legacy Font too (same lookup
+            // the announcement subtitle uses, confirmed in-game)
+            foreach (var font in Resources.FindObjectsOfTypeAll<Font>())
+            {
+                if (font != null && font.name.ToLowerInvariant().Contains("bender"))
+                {
+                    _keypadSlotStyle.font = font;
+                    _keypadButtonStyle.font = font;
+                    break;
+                }
+            }
         }
 
         private void Update()
@@ -248,6 +612,7 @@ namespace Blackout
                 if (_inRaid)
                 {
                     // raid ended; the scene (and everything we touched) is gone
+                    CloseKeypad();
                     _inRaid = false;
                     _doorsLocked = false;
                     _exfilsDumped = false;
@@ -320,6 +685,17 @@ namespace Blackout
             if (_adminSwitchSpawned && !_whiteboardSpawned)
             {
                 _whiteboardSpawned = SpawnWhiteboard();
+            }
+
+            // walked away, died, or the blackout ended - drop the keypad and give input back
+            if (_keypadDoor != null)
+            {
+                var player = gameWorld.MainPlayer;
+                if (!_blackoutActive || player == null || player.HealthController?.IsAlive != true
+                    || (player.Position - _keypadDoor.transform.position).sqrMagnitude > 16f)
+                {
+                    CloseKeypad();
+                }
             }
 
             if (_inspectDoorKey.Value.IsDown())
@@ -915,6 +1291,11 @@ namespace Blackout
 
         private void OnGUI()
         {
+            if (_keypadDoor != null)
+            {
+                KeypadGui();
+            }
+
             if (_subtitleText == null || Time.time >= _subtitleUntil)
             {
                 return;

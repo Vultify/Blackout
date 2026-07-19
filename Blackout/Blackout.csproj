@@ -11,6 +11,7 @@
   <ItemGroup>
     <EmbeddedResource Include="marker_digits.png" LogicalName="Blackout.marker_digits.png" />
     <EmbeddedResource Include="board_overlay.png" LogicalName="Blackout.board_overlay.png" />
+    <EmbeddedResource Include="keypad\*.png" LogicalName="Blackout.keypad.%(Filename).png" />
   </ItemGroup>
 
   <ItemGroup>
@@ -64,6 +65,14 @@
     </Reference>
     <Reference Include="BepInEx">
       <HintPath>$(SPT_PATH)\BepInEx\core\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(SPT_PATH)\BepInEx\core\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="spt-reflection">
+      <HintPath>$(SPT_PATH)\BepInEx\plugins\spt\spt-reflection.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Sirenix.Serialization">
