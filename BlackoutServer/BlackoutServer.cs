@@ -32,87 +32,21 @@ namespace BlackoutServer
         public override Dictionary<string, SemanticVersioning.Range> ModDependencies { get; init; } = new()
         {
             { "com.wtt.commonlib", new SemanticVersioning.Range(">=2.0.0") },
-            // the LV-119 rig clones Content Backport's, and uses its soft-armour inserts
+            // the LV-119 rig uses Content Backport's soft-armour inserts
             { "com.wtt.contentbackport", new SemanticVersioning.Range(">=1.0.0") },
         };
     }
 
-    [Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 3)]
-    public class BlackoutServerMod : IOnLoad
+    // Every item the mod adds, created through WTT-CommonLib from db/CustomItems/ - the Wedge's gear
+    // (wedge_gear.json) and the event's Admin's key (blackout_key.json). Runs post-DB so the clone
+    // donors already exist. Deliberately one path for all items rather than mixing in SPT's own
+    // CustomItemService, so item definitions live in JSON and behave identically.
+    [Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 4)]
+    public class BlackoutCustomItems : IOnLoad
     {
         // the live event's Admin's key, real 1.0.6.5 item id - opens the system admin office
-        public const string AdminKeyId = "6a33c17933cff6b88c08902e";
-        private const string DonorArsenalKey = "5c1f79a086f7746ed066fb8f";
-        private const string KeyMechanicalParent = "5c99f98d86f7745c314214b3";
-        private const string KeysHandbookParent = "5c518ec986f7743b68682ce2";
+        private const string AdminKey = "6a33c17933cff6b88c08902e";
 
-        private readonly CustomItemService _customItemService;
-        private readonly DatabaseService _databaseService;
-        private readonly ISptLogger<BlackoutServerMod> _logger;
-
-        public BlackoutServerMod(
-            CustomItemService customItemService,
-            DatabaseService databaseService,
-            ISptLogger<BlackoutServerMod> logger)
-        {
-            _customItemService = customItemService;
-            _databaseService = databaseService;
-            _logger = logger;
-        }
-
-        public Task OnLoad()
-        {
-            try
-            {
-                _customItemService.CreateItemFromClone(new NewItemFromCloneDetails
-                {
-                    ItemTplToClone = DonorArsenalKey,
-                    NewId = AdminKeyId,
-                    ParentId = KeyMechanicalParent,
-                    HandbookParentId = KeysHandbookParent,
-                    HandbookPriceRoubles = 150000,
-                    Locales = new Dictionary<string, LocaleDetails>
-                    {
-                        ["en"] = new LocaleDetails
-                        {
-                            Name = "Admin's key",
-                            ShortName = "Admin",
-                            Description =
-                                "A mechanical key that unlocks either a utility room or one of the " +
-                                "system administrators' offices.",
-                        }
-                    },
-                    OverrideProperties = new TemplateItemProperties
-                    {
-                        MaximumNumberOfUsage = 0,
-                        CanSellOnRagfair = false,
-                    }
-                });
-
-                // verify the item actually landed in the database, not just that the call returned
-                if (_databaseService.GetItems().TryGetValue(new MongoId(AdminKeyId), out var created))
-                {
-                    _logger.Success($"[Blackout] Key created: {created.Id} ({created.Properties?.MaximumNumberOfUsage} uses = infinite)");
-                }
-                else
-                {
-                    _logger.Error("[Blackout] Key creation FAILED - id not present in item database");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"[Blackout] Server OnLoad failed: {ex}");
-            }
-
-            return Task.CompletedTask;
-        }
-    }
-
-    // The Wedge's gear, repacked from live-EFT bundles and created via WTT-CommonLib
-    // (db/CustomItems/wedge_gear.json). Runs post-DB so the clone donors already exist.
-    [Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 4)]
-    public class BlackoutWedgeGear : IOnLoad
-    {
         // MP7 host weapons + the two mod items whose slot chain we wire by hand
         private const string Mp7a1 = "5ba26383d4351e00334c93d9";
         private const string Mp7a2 = "5bd70322209c4d00d7167b8f";
@@ -153,12 +87,12 @@ namespace BlackoutServer
 
         private readonly WTTServerCommonLib.WTTServerCommonLib _commonLib;
         private readonly DatabaseService _databaseService;
-        private readonly ISptLogger<BlackoutWedgeGear> _logger;
+        private readonly ISptLogger<BlackoutCustomItems> _logger;
 
-        public BlackoutWedgeGear(
+        public BlackoutCustomItems(
             WTTServerCommonLib.WTTServerCommonLib commonLib,
             DatabaseService databaseService,
-            ISptLogger<BlackoutWedgeGear> logger)
+            ISptLogger<BlackoutCustomItems> logger)
         {
             _commonLib = commonLib;
             _databaseService = databaseService;
@@ -213,9 +147,18 @@ namespace BlackoutServer
                     AddToSlot(items, helmet, "mod_equipment_000", ComTacVIBlack);
                 }
 
-                var made = new[] { ArsAdapter, FxKposStock, Sf3pMuzzle, ExfilMulticamHelmet,
+                var made = new[] { AdminKey, ArsAdapter, FxKposStock, Sf3pMuzzle, ExfilMulticamHelmet,
                     WedgeCoverHelmet, ComTacVIBlack, WedgeBlackExfilHelmet, Lv119Rig }
                     .Count(id => items.ContainsKey(new MongoId(id)));
+
+                // single use; a wrong clone would silently inherit the donor's usage limit instead
+                items.TryGetValue(new MongoId(AdminKey), out var adminKey);
+                var keyUses = adminKey?.Properties?.MaximumNumberOfUsage;
+                var keySellable = adminKey?.Properties?.CanSellOnRagfair;
+                // prices live outside the item template, so check the tables they actually land in
+                var keyHandbook = _databaseService.GetHandbook().Items?
+                    .FirstOrDefault(i => i.Id == new MongoId(AdminKey))?.Price;
+                _databaseService.GetPrices().TryGetValue(new MongoId(AdminKey), out var keyFlea);
 
                 var coverSlot = SlotContains(items, WedgeBlackExfilHelmet, "mod_equipment_002", WedgeCoverHelmet);
                 var comtacMounted = SlotContains(items, BlackExfilHelmet, "mod_equipment_000", ComTacVIBlack);
@@ -229,19 +172,22 @@ namespace BlackoutServer
                 var layoutRegistered = _commonLib.CustomRigLayoutService
                     .GetLayoutManifest().Contains(Lv119LayoutBundle);
 
-                if (made == 8 && SlotContains(items, Mp7a1, "mod_stock", ArsAdapter)
+                if (made == 9 && keyUses == 1 && keySellable == true && keyHandbook == 100000 && keyFlea == 157434
+                    && SlotContains(items, Mp7a1, "mod_stock", ArsAdapter)
                     && SlotContains(items, Mp7a1, "mod_muzzle", Sf3pMuzzle) && coverSlot && comtacMounted
                     && rigGrids == 15 && rigCells == 28 && rigLayout == Lv119Layout && layoutRegistered)
                 {
-                    _logger.Success($"[Blackout] Wedge gear created ({made}/8); MP7 slots wired; " +
+                    _logger.Success($"[Blackout] Custom items created ({made}/9 via WTT-CommonLib); " +
+                        $"Admin's key: {keyUses} use, flea {keyFlea:N0}, handbook {keyHandbook:N0}, sellable {keySellable}; MP7 slots wired; " +
                         $"cover slot on custom black EXFIL: {coverSlot}; ComTac VI on EXFIL: {comtacMounted}; " +
                         $"LV-119 {rigGrids} pouches / {rigCells} cells, layout '{rigLayout}' " +
                         $"(bundle registered: {layoutRegistered}).");
                 }
                 else
                 {
-                    _logger.Error($"[Blackout] Wedge gear incomplete - created {made}/8, cover slot {coverSlot}, " +
-                        $"ComTac VI {comtacMounted}, LV-119 {rigGrids} pouches / {rigCells} cells, " +
+                    _logger.Error($"[Blackout] Custom items incomplete - created {made}/9, key uses {keyUses} (want 1), " +
+                        $"cover slot {coverSlot}, ComTac VI {comtacMounted}, " +
+                        $"LV-119 {rigGrids} pouches / {rigCells} cells, " +
                         $"layout '{rigLayout}' registered={layoutRegistered}; check CustomItems load above.");
                 }
             }
