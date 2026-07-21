@@ -26,6 +26,10 @@
       <HintPath>$(SPT_PATH)\SPT\SemanticVersioning.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="WTT-ServerCommonLib">
+      <HintPath>$(SPT_PATH)\SPT\user\mods\WTT-ServerCommonLib\WTT-ServerCommonLib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

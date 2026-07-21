@@ -1,0 +1,671 @@
+{
+  "69985e9146e48aa39d06a685": {
+    "itemTplToClone": "5649b2314bdc2d79388b4576",
+    "parentId": "55818a594bdc2db9688b456a",
+    "handbookParentId": "5b5f757486f774093e6cb507",
+    "overrideProperties": {
+      "ExaminedByDefault": true,
+      "Weight": 0.12,
+      "BackgroundColor": "grey",
+      "Prefab": {
+        "path": "assets/content/items/mods/stocks/stock_mp7_fab_defense_ars_adapter.bundle",
+        "rcid": ""
+      },
+      "CanSellOnRagfair": false,
+      "CanRequireOnRagfair": false
+    },
+    "locales": {
+      "en": {
+        "name": "HK MP7 FAB Defense ARS stock adapter",
+        "shortName": "ARS Adapter",
+        "description": "FAB Defense stock adapter that mounts an ARS-pattern stock to the HK MP7."
+      }
+    },
+    "fleaPriceRoubles": 22000,
+    "handbookPriceRoubles": 20000
+  },
+  "69985e7819f8713b630de3d6": {
+    "itemTplToClone": "5bcf0213d4351e0085327c17",
+    "parentId": "55818a594bdc2db9688b456a",
+    "handbookParentId": "5b5f757486f774093e6cb507",
+    "overrideProperties": {
+      "ExaminedByDefault": true,
+      "Weight": 0.28,
+      "BackgroundColor": "grey",
+      "Prefab": {
+        "path": "assets/content/items/mods/stocks/stock_base_fab_defense_fx_kpos_ars.bundle",
+        "rcid": ""
+      },
+      "CanSellOnRagfair": false,
+      "CanRequireOnRagfair": false
+    },
+    "locales": {
+      "en": {
+        "name": "FAB Defense FX-KPOS ARS stock",
+        "shortName": "FX-KPOS",
+        "description": "FAB Defense FX-KPOS ARS-pattern stock. Mounts to the MP7 via the ARS adapter."
+      }
+    },
+    "fleaPriceRoubles": 18000,
+    "handbookPriceRoubles": 16000
+  },
+  "69985ea146e48aa39d06a690": {
+    "itemTplToClone": "5ba26acdd4351e003562908e",
+    "parentId": "550aa4bf4bdc2dd6348b456b",
+    "handbookParentId": "5b5f724c86f774093f2ecf15",
+    "overrideProperties": {
+      "ExaminedByDefault": true,
+      "Weight": 0.15,
+      "BackgroundColor": "grey",
+      "Recoil": -1,
+      "Ergonomics": -2,
+      "Prefab": {
+        "path": "assets/content/items/mods/muzzle/muzzle_mp7_surefire_sf3p_556_mp7_flash_hider_46x30.bundle",
+        "rcid": ""
+      },
+      "CanSellOnRagfair": false,
+      "CanRequireOnRagfair": false
+    },
+    "locales": {
+      "en": {
+        "name": "SureFire SF3P flash hider (MP7 46x30)",
+        "shortName": "SF3P",
+        "description": "SureFire SF3P three-prong flash hider adapted to the HK MP7 46x30 muzzle thread."
+      }
+    },
+    "fleaPriceRoubles": 24000,
+    "handbookPriceRoubles": 21000
+  },
+  "69985ea246e48aa39d06a691": {
+    "itemTplToClone": "5e00c1ad86f774747333222c",
+    "parentId": "5a341c4086f77401f2541505",
+    "handbookParentId": "5b47574386f77428ca22b330",
+    "overrideProperties": {
+      "ExaminedByDefault": true,
+      "BackgroundColor": "grey",
+      "Prefab": {
+        "path": "assets/content/items/equipment/item_equipment_helmet_team_wendy_exfil_gen2_multicam_bp03/item_equipment_helmet_team_wendy_exfil_multicam_bp03.bundle",
+        "rcid": ""
+      },
+      "CanSellOnRagfair": false,
+      "CanRequireOnRagfair": false
+    },
+    "locales": {
+      "en": {
+        "name": "Team Wendy EXFIL Ballistic Helmet (MultiCam)",
+        "shortName": "EXFIL MC",
+        "description": "Team Wendy EXFIL Ballistic helmet in a MultiCam finish, as worn by Black Division operators."
+      }
+    },
+    "fleaPriceRoubles": 62000,
+    "handbookPriceRoubles": 58000
+  },
+  "69985ea646e48aa39d06a695": {
+    "itemTplToClone": "5e00c1ad86f774747333222c",
+    "parentId": "5a341c4086f77401f2541505",
+    "handbookParentId": "5b47574386f77428ca22b330",
+    "overrideProperties": {
+      "ExaminedByDefault": true,
+      "BackgroundColor": "grey",
+      "Prefab": {
+        "path": "assets/content/items/equipment/helmet_team_wendy_exfil_black_wedge/item_equipment_helmet_team_wendy_exfil_black_wedge.bundle",
+        "rcid": ""
+      },
+      "CanSellOnRagfair": false,
+      "CanRequireOnRagfair": false
+    },
+    "locales": {
+      "en": {
+        "name": "Team Wendy EXFIL Ballistic Helmet (Black, Wedge)",
+        "shortName": "EXFIL BK",
+        "description": "Team Wendy EXFIL Ballistic helmet in black, set up by the Black Division operative known as the Wedge. Its shell is cut for a cloth cover."
+      }
+    },
+    "fleaPriceRoubles": 62000,
+    "handbookPriceRoubles": 58000
+  },
+  "69985ea346e48aa39d06a692": {
+    "itemTplToClone": "5a398ab9c4a282000c5a9842",
+    "parentId": "55818b224bdc2dde698b456f",
+    "handbookParentId": "5b47574386f77428ca22b32f",
+    "overrideProperties": {
+      "ExaminedByDefault": true,
+      "Weight": 0.2,
+      "BackgroundColor": "grey",
+      "Prefab": {
+        "path": "assets/content/items/equipment/helmet_wedge_boss_cover/item_equipment_helmet_wedge_boss_cover.bundle",
+        "rcid": ""
+      },
+      "CanSellOnRagfair": false,
+      "CanRequireOnRagfair": false
+    },
+    "locales": {
+      "en": {
+        "name": "Wedge's EXFIL helmet cover",
+        "shortName": "Wedge Cover",
+        "description": "A weathered cloth cover for the Team Wendy EXFIL helmet, as worn by the Wedge. Fits the EXFIL MultiCam shell."
+      }
+    },
+    "fleaPriceRoubles": 30000,
+    "handbookPriceRoubles": 28000
+  },
+  "69985ea446e48aa39d06a693": {
+    "itemTplToClone": "66b5f6a28ca68c6461709ed8",
+    "parentId": "5645bcb74bdc2ded0b8b4578",
+    "handbookParentId": "5b5f6f3c86f774094242ef87",
+    "overrideProperties": {
+      "ExaminedByDefault": true,
+      "Weight": 0.439,
+      "BackgroundColor": "grey",
+      "Prefab": {
+        "path": "assets/content/items/barter/item_equipment_headset_comtac_6_black_bp03/item_equipment_headset_comtac_6_black_bp03_exfil.bundle",
+        "rcid": ""
+      },
+      "CanSellOnRagfair": false,
+      "CanRequireOnRagfair": false
+    },
+    "locales": {
+      "en": {
+        "name": "TW EXFIL Peltor ComTac VI headset (Black)",
+        "shortName": "ComTac VI",
+        "description": "An improved version of the ComTac V communication headset, equipped with advanced environmental listening settings and an NIB (Natural Interaction Behavior) feature. Equipped with a mount for attaching the headset to Team Wendy EXFIL helmets. Manufactured by 3M Peltor. Black version."
+      }
+    },
+    "fleaPriceRoubles": 41000,
+    "handbookPriceRoubles": 38000
+  },
+  "69985ea546e48aa39d06a694": {
+    "itemTplToClone": "5d5d87f786f77427997cfaef",
+    "parentId": "5448e5284bdc2dcb718b4567",
+    "handbookParentId": "5b5f6f8786f77447ed563642",
+    "overrideProperties": {
+      "ExaminedByDefault": true,
+      "BackgroundColor": "grey",
+      "Width": 4,
+      "Height": 4,
+      "Prefab": {
+        "path": "assets/content/items/equipment/rig_spiritus_icebreaker/item_equipment_armor_spiritus_icebreaker.bundle",
+        "rcid": ""
+      },
+      "CanSellOnRagfair": false,
+      "CanRequireOnRagfair": false,
+      "Grids": [
+        {
+          "_id": "69985ec146e48aa39d06a601",
+          "_name": "GridView (1)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 1,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ec246e48aa39d06a602",
+          "_name": "GridView (2)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 1,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ec346e48aa39d06a603",
+          "_name": "GridView (3)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 1,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ec446e48aa39d06a604",
+          "_name": "GridView (4)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 1,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ec546e48aa39d06a605",
+          "_name": "GridView (5)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ec646e48aa39d06a606",
+          "_name": "GridView (6)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ec746e48aa39d06a607",
+          "_name": "GridView (7)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ec846e48aa39d06a608",
+          "_name": "GridView (8)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ec946e48aa39d06a609",
+          "_name": "GridView (9)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985eca46e48aa39d06a60a",
+          "_name": "GridView (10)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ecb46e48aa39d06a60b",
+          "_name": "GridView (11)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ecc46e48aa39d06a60c",
+          "_name": "GridView (12)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ecd46e48aa39d06a60d",
+          "_name": "GridView (13)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ece46e48aa39d06a60e",
+          "_name": "GridView (14)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 2,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        },
+        {
+          "_id": "69985ecf46e48aa39d06a60f",
+          "_name": "GridView (15)",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "cellsH": 1,
+            "cellsV": 2,
+            "filters": [
+              {
+                "Filter": [
+                  "54009119af1c881c07000029"
+                ],
+                "ExcludedFilter": [
+                  "5448bf274bdc2dfc2f8b456a"
+                ]
+              }
+            ],
+            "isSortingTable": false,
+            "maxCount": 0,
+            "maxWeight": 0,
+            "minCount": 0
+          },
+          "_proto": "55d329c24bdc2d892f8b4567"
+        }
+      ],
+      "Slots": [
+        {
+          "_name": "Front_plate",
+          "_id": "69985ed146e48aa39d06a6d1",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "filters": [
+              {
+                "Filter": [
+                  "656fa53d94b480b8a500c0e4"
+                ],
+                "Plate": "656fa53d94b480b8a500c0e4",
+                "armorColliders": [],
+                "armorPlateColliders": [
+                  "Plate_Granit_SAPI_chest"
+                ],
+                "bluntDamageReduceFromSoftArmor": false,
+                "locked": false
+              }
+            ]
+          },
+          "_required": false,
+          "_mergeSlotWithChildren": true,
+          "_proto": "64479fdf9731c8fadc0642c1"
+        },
+        {
+          "_name": "Back_plate",
+          "_id": "69985ed246e48aa39d06a6d2",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "filters": [
+              {
+                "Filter": [
+                  "656fa53d94b480b8a500c0e4"
+                ],
+                "Plate": "656fa53d94b480b8a500c0e4",
+                "armorColliders": [],
+                "armorPlateColliders": [
+                  "Plate_Granit_SAPI_back"
+                ],
+                "bluntDamageReduceFromSoftArmor": false,
+                "locked": false
+              }
+            ]
+          },
+          "_required": false,
+          "_mergeSlotWithChildren": true,
+          "_proto": "64479fdf9731c8fadc0642c1"
+        },
+        {
+          "_name": "Soft_armor_front",
+          "_id": "69985ed346e48aa39d06a6d3",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "filters": [
+              {
+                "Filter": [
+                  "68a5f30248f18317750ab20b"
+                ],
+                "Plate": "68a5f30248f18317750ab20b",
+                "armorColliders": [],
+                "armorPlateColliders": [
+                  "Plate_Granit_SAPI_chest"
+                ],
+                "bluntDamageReduceFromSoftArmor": false,
+                "locked": true
+              }
+            ]
+          },
+          "_required": false,
+          "_mergeSlotWithChildren": true,
+          "_proto": "64479fdf9731c8fadc0642c1"
+        },
+        {
+          "_name": "Soft_armor_back",
+          "_id": "69985ed446e48aa39d06a6d4",
+          "_parent": "69985ea546e48aa39d06a694",
+          "_props": {
+            "filters": [
+              {
+                "Filter": [
+                  "68a5f3a348f18317750ab4be"
+                ],
+                "Plate": "68a5f3a348f18317750ab4be",
+                "armorColliders": [],
+                "armorPlateColliders": [
+                  "Plate_Granit_SAPI_back"
+                ],
+                "bluntDamageReduceFromSoftArmor": false,
+                "locked": true
+              }
+            ]
+          },
+          "_required": false,
+          "_mergeSlotWithChildren": true,
+          "_proto": "64479fdf9731c8fadc0642c1"
+        }
+      ],
+      "Weight": 5.1,
+      "ArmorMaterial": "Aramid",
+      "BluntThroughput": 0.34,
+      "speedPenaltyPercent": -2,
+      "mousePenalty": -2,
+      "weaponErgonomicPenalty": -1,
+      "BlocksArmorVest": true,
+      "RigLayoutName": "wedge_lv119"
+    },
+    "locales": {
+      "en": {
+        "name": "Spiritus Systems LV-119 (Icebreaker)",
+        "shortName": "LV-119",
+        "description": "A highly customizable modular plate carrier by Spiritus Systems, built for maximum comfort in combat. This MultiCam Black version setup is built by a Black Division operative with the callsign The Wedge."
+      }
+    },
+    "fleaPriceRoubles": 120000,
+    "handbookPriceRoubles": 110000
+  }
+}
