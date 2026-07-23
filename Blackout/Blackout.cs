@@ -26,6 +26,23 @@ namespace Blackout
             "door_Laboratory_Medical_corridor_floor_1_00006",
         };
 
+        // the two vehicle-gate ramps, sized from their bot-zone spawn clusters plus margin. Live only
+        // sends Black Division behind the gates AFTER the button press, so until the switch fires these
+        // volumes are carved off the AI navmesh - nobody (least of all the key-carrying Wedge) can
+        // wander behind a gate the player cannot open yet
+        private static readonly Vector3[] RampCenters =
+        {
+            new Vector3(-170.8f, 2.7f, -224.9f), // parking gate
+            new Vector3(-230.2f, 2.7f, -450.7f), // hangar gate
+        };
+        private static readonly Vector3[] RampSizes =
+        {
+            new Vector3(35f, 6f, 12f),
+            new Vector3(38f, 6f, 12f),
+        };
+        private readonly List<GameObject> _rampBlockers = new List<GameObject>();
+        private bool _rampsBlocked;
+
         // the live event's Exit_Switch trigger pose and its Boiler_Control_Panel_A wall
         // prop, both read from the live 1.0.6.5 scene files
         private const string AdminSwitchId = "blackout_admin_switch";
@@ -633,6 +650,7 @@ namespace Blackout
                         _boardRt = null;
                     }
                     _gatesActivated = false;
+                    UnblockGateRamps();
                     _statusStarted = false;
                     _clockStarted = false;
                     _blackoutActive = false;
@@ -689,6 +707,11 @@ namespace Blackout
             if (_adminSwitchSpawned && !_whiteboardSpawned)
             {
                 _whiteboardSpawned = SpawnWhiteboard();
+            }
+
+            if (_lockdownApplied && !_rampsBlocked && !_gatesActivated)
+            {
+                _rampsBlocked = BlockGateRamps();
             }
 
             // walked away, died, or the blackout ended - drop the keypad and give input back
@@ -2014,8 +2037,44 @@ namespace Blackout
             ActivateGates();
         }
 
+        private bool BlockGateRamps()
+        {
+            for (var i = 0; i < RampCenters.Length; i++)
+            {
+                var go = new GameObject("blackout_ramp_block");
+                go.transform.position = RampCenters[i];
+                var obstacle = go.AddComponent<UnityEngine.AI.NavMeshObstacle>();
+                obstacle.shape = UnityEngine.AI.NavMeshObstacleShape.Box;
+                obstacle.size = RampSizes[i];
+                obstacle.carving = true;
+                _rampBlockers.Add(go);
+            }
+            Logger.LogInfo($"[Blackout] {_rampBlockers.Count} gate ramps carved off the AI navmesh until the switch");
+            return true;
+        }
+
+        private void UnblockGateRamps()
+        {
+            if (_rampBlockers.Count == 0)
+            {
+                _rampsBlocked = false;
+                return;
+            }
+            foreach (var go in _rampBlockers)
+            {
+                if (go != null)
+                {
+                    Destroy(go);
+                }
+            }
+            _rampBlockers.Clear();
+            _rampsBlocked = false;
+            Logger.LogInfo("[Blackout] Gate ramps reopened to AI");
+        }
+
         private void ActivateGates()
         {
+            UnblockGateRamps();
             var controller = ExfiltrationControllerClass.Instance;
             if (controller == null || controller.ExfiltrationPoints == null)
             {
