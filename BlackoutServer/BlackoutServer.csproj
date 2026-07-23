@@ -30,6 +30,10 @@
       <HintPath>$(SPT_PATH)\SPT\user\mods\WTT-ServerCommonLib\WTT-ServerCommonLib.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="MoreBotsServer">
+      <HintPath>$(SPT_PATH)\SPT\user\mods\MoreBotsServer\MoreBotsServer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

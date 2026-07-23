@@ -1,0 +1,46 @@
+[
+  {
+    "type": "top",
+    "suiteId": "69985f0546e48aa39d06a705",
+    "outfitId": "69985f0646e48aa39d06a706",
+    "topId": "69985f0246e48aa39d06a702",
+    "handsId": "69985f0946e48aa39d06a709",
+    "locales": {
+      "en": {
+        "name": "The Wedge",
+        "description": "Black Division commander's rig."
+      }
+    },
+    "topBundlePath": "assets/content/characters/character/prefabs/top_boss_wedge.bundle",
+    "handsBundlePath": "fphands/top_team_leader_bd1_hands.bundle",
+    "traderId": "5ac3b934156ae10c4430e83c",
+    "loyaltyLevel": 1,
+    "profileLevel": 1,
+    "standing": 0,
+    "currencyId": "MONEY_ROUBLES",
+    "price": 150,
+    "questRequirements": [],
+    "achievementRequirements": []
+  },
+  {
+    "type": "bottom",
+    "suiteId": "69985f0746e48aa39d06a707",
+    "outfitId": "69985f0846e48aa39d06a708",
+    "bottomId": "69985f0346e48aa39d06a703",
+    "locales": {
+      "en": {
+        "name": "The Wedge",
+        "description": "Black Division commander's trousers."
+      }
+    },
+    "bottomBundlePath": "assets/content/characters/character/prefabs/pants_boss_wedge.bundle",
+    "traderId": "5ac3b934156ae10c4430e83c",
+    "loyaltyLevel": 1,
+    "profileLevel": 1,
+    "standing": 0,
+    "currencyId": "MONEY_ROUBLES",
+    "price": 150,
+    "questRequirements": [],
+    "achievementRequirements": []
+  }
+]

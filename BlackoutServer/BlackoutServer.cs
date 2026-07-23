@@ -4,10 +4,14 @@ using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Models.Eft.Common;
 using SPTarkov.Server.Core.Models.Eft.Common.Tables;
+using SPTarkov.Server.Core.Models.Spt.Config;
 using SPTarkov.Server.Core.Models.Spt.Mod;
 using SPTarkov.Server.Core.Models.Utils;
+using SPTarkov.Server.Core.Servers;
 using SPTarkov.Server.Core.Services;
 using SPTarkov.Server.Core.Services.Mod;
+using SPTarkov.Server.Core.Utils;
+using SPTarkov.Server.Core.Utils.Json;
 
 namespace BlackoutServer
 {
@@ -32,8 +36,10 @@ namespace BlackoutServer
         public override Dictionary<string, SemanticVersioning.Range> ModDependencies { get; init; } = new()
         {
             { "com.wtt.commonlib", new SemanticVersioning.Range(">=2.0.0") },
-            // the LV-119 rig uses Content Backport's soft-armour inserts
+            // Content Backport supplies the LV-119 inserts AND the Black Division clothing/voices
             { "com.wtt.contentbackport", new SemanticVersioning.Range(">=1.0.0") },
+            // the Wedge and his soldiers are our own MoreBotsAPI bot types
+            { "com.morebotsapi.tacticaltoaster", new SemanticVersioning.Range(">=2.0.0") },
         };
     }
 
@@ -61,6 +67,10 @@ namespace BlackoutServer
             "55d614004bdc2d86028b4568", // Monster
             "5ea17bbc09aa976f2e7a51cd", // RC2
         };
+
+        // Content Backport's black AN/PEQ-15 is a new clone id, so it's absent from every vanilla weapon's
+        // tactical filter - the MP7 must be told to accept it (matches Wedge's real preset).
+        private const string AnPeq15Black = "68bedc0365e7dcf94f0cb0fc";
 
         // the MultiCam helmet (needs its inserts pre-installed via preset) and the Wedge cover mod
         private const string ExfilMulticamHelmet = "69985ea246e48aa39d06a691";
@@ -118,11 +128,26 @@ namespace BlackoutServer
                 // MP7A1/A2 accept the SF3P flash hider in mod_muzzle
                 AddToSlot(items, Mp7a1, "mod_muzzle", Sf3pMuzzle);
                 AddToSlot(items, Mp7a2, "mod_muzzle", Sf3pMuzzle);
-                // the SF3P's own mod_muzzle accepts the SOCOM556 suppressors, not the inherited MP7 Rotex
-                var sf3pMuzzleSlot = FindSlot(items, Sf3pMuzzle, "mod_muzzle")?.Properties?.Filters?.FirstOrDefault();
-                if (sf3pMuzzleSlot != null)
+                // the SF3P's own mod_muzzle accepts the SOCOM556 suppressors, not the inherited MP7 Rotex.
+                // Required: the bot generator hard-rewrites mod_muzzle spawn chance to 95 the moment a
+                // muzzle device installs (AdjustSlotSpawnChances), so a chance-100 nested suppressor can
+                // still silently miss - a required slot bypasses the roll and always resolves from the filter
+                var sf3pSlot = FindSlot(items, Sf3pMuzzle, "mod_muzzle");
+                if (sf3pSlot != null)
                 {
-                    sf3pMuzzleSlot.Filter = new HashSet<MongoId>(Socom556Suppressors.Select(id => new MongoId(id)));
+                    sf3pSlot.Required = true;
+                    var sf3pMuzzleFilter = sf3pSlot.Properties?.Filters?.FirstOrDefault();
+                    if (sf3pMuzzleFilter != null)
+                    {
+                        sf3pMuzzleFilter.Filter = new HashSet<MongoId>(Socom556Suppressors.Select(id => new MongoId(id)));
+                    }
+                }
+                // the black AN/PEQ-15 goes in every MP7 tactical slot (all three, so it mounts anywhere the
+                // vanilla one does) - without this the gunsmith rejects it since it's a new backport id
+                foreach (var slot in new[] { "mod_tactical_000", "mod_tactical_001", "mod_tactical_002" })
+                {
+                    AddToSlot(items, Mp7a1, slot, AnPeq15Black);
+                    AddToSlot(items, Mp7a2, slot, AnPeq15Black);
                 }
 
                 // ship the MultiCam helmet with its soft-armor inserts pre-installed via a default preset,
@@ -162,6 +187,11 @@ namespace BlackoutServer
 
                 var coverSlot = SlotContains(items, WedgeBlackExfilHelmet, "mod_equipment_002", WedgeCoverHelmet);
                 var comtacMounted = SlotContains(items, BlackExfilHelmet, "mod_equipment_000", ComTacVIBlack);
+                // the two filter patches the gunsmith AND bot generation both depend on - assert the
+                // written state, a silent FindSlot miss here is exactly how a suppressor vanishes
+                var socomOnSf3p = SlotContains(items, Sf3pMuzzle, "mod_muzzle", Socom556Suppressors[0])
+                    && FindSlot(items, Sf3pMuzzle, "mod_muzzle")?.Required == true;
+                var peqOnMp7 = SlotContains(items, Mp7a1, "mod_tactical_000", AnPeq15Black);
 
                 // read the rig's real state back out of the database rather than trusting the JSON
                 items.TryGetValue(new MongoId(Lv119Rig), out var rig);
@@ -175,18 +205,17 @@ namespace BlackoutServer
                 if (made == 9 && keyUses == 1 && keySellable == true && keyHandbook == 100000 && keyFlea == 157434
                     && SlotContains(items, Mp7a1, "mod_stock", ArsAdapter)
                     && SlotContains(items, Mp7a1, "mod_muzzle", Sf3pMuzzle) && coverSlot && comtacMounted
+                    && socomOnSf3p && peqOnMp7
                     && rigGrids == 15 && rigCells == 28 && rigLayout == Lv119Layout && layoutRegistered)
                 {
-                    _logger.Success($"[Blackout] Custom items created ({made}/9 via WTT-CommonLib); " +
-                        $"Admin's key: {keyUses} use, flea {keyFlea:N0}, handbook {keyHandbook:N0}, sellable {keySellable}; MP7 slots wired; " +
-                        $"cover slot on custom black EXFIL: {coverSlot}; ComTac VI on EXFIL: {comtacMounted}; " +
-                        $"LV-119 {rigGrids} pouches / {rigCells} cells, layout '{rigLayout}' " +
-                        $"(bundle registered: {layoutRegistered}).");
+                    // everything above is asserted, not just counted - the detail only prints on failure
+                    _logger.Success($"[Blackout] Custom items created ({made}/9 via WTT-CommonLib).");
                 }
                 else
                 {
                     _logger.Error($"[Blackout] Custom items incomplete - created {made}/9, key uses {keyUses} (want 1), " +
                         $"cover slot {coverSlot}, ComTac VI {comtacMounted}, " +
+                        $"SOCOM on SF3P {socomOnSf3p}, black PEQ on MP7 {peqOnMp7}, " +
                         $"LV-119 {rigGrids} pouches / {rigCells} cells, " +
                         $"layout '{rigLayout}' registered={layoutRegistered}; check CustomItems load above.");
                 }
@@ -277,6 +306,309 @@ namespace BlackoutServer
             {
                 filter.Filter = new HashSet<MongoId> { new MongoId(onlyModId) };
             }
+        }
+    }
+
+    // Our own Black Division faction. The Wedge and his soldiers are our MoreBotsAPI types (not the
+    // separate BlackDiv mod), so we register the faction ourselves. Runs at LoadFactions so it exists
+    // before any hostility wiring.
+    [Injectable(TypePriority = MoreBotsServer.MoreBotsLoadOrder.LoadFactions + 1)]
+    public class BlackoutFaction : IOnLoad
+    {
+        public const string FactionName = "blackdivision";
+
+        private readonly MoreBotsServer.Services.FactionService _factionService;
+        private readonly ISptLogger<BlackoutFaction> _logger;
+
+        public BlackoutFaction(MoreBotsServer.Services.FactionService factionService, ISptLogger<BlackoutFaction> logger)
+        {
+            _factionService = factionService;
+            _logger = logger;
+        }
+
+        public Task OnLoad()
+        {
+            try
+            {
+                var faction = new Faction { Name = FactionName, RevengeAfterRaids = false };
+                faction.BotTypes.Add((WildSpawnType)BlackoutBots.WedgeSpawnType);
+                faction.BotTypes.Add((WildSpawnType)BlackoutBots.SoldierSpawnType);
+                _factionService.Factions[FactionName] = faction;
+                _logger.Success($"[Blackout] Faction '{FactionName}' registered ({faction.BotTypes.Count} types).");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"[Blackout] Faction registration failed: {ex}");
+            }
+            return Task.CompletedTask;
+        }
+    }
+
+    // Creates the Wedge + Black Division soldier bot types and wires their gear and hostility.
+    // Soldiers use BlackDiv's shared type + loadouts (used with TacticalToaster's permission);
+    // the Wedge uses our own type with our 9 backported gear items.
+    [Injectable(TypePriority = MoreBotsServer.MoreBotsLoadOrder.LoadBots + 1)]
+    public class BlackoutBots : IOnLoad
+    {
+        public const int WedgeSpawnType = 868588;
+        public const int SoldierSpawnType = 868589;
+        public const string WedgeName = "bossWedge";
+        public const string SoldierName = "blackDivAssault";
+
+        private const string ArmoryGuid = "com.wtt.armory";
+        private static readonly string[] EnemyFactions = { "savage", "rogues", "usec", "bear", "infected" };
+
+        private readonly MoreBotsServer.MoreBotsAPI _moreBots;
+        private readonly MoreBotsServer.Services.MoreBotsCustomBotTypeService _customBotTypeService;
+        private readonly MoreBotsServer.Services.FactionService _factionService;
+        private readonly WTTServerCommonLib.WTTServerCommonLib _commonLib;
+        private readonly DatabaseService _databaseService;
+        private readonly ConfigServer _configServer;
+        private readonly IReadOnlyList<SptMod> _modList;
+        private readonly ISptLogger<BlackoutBots> _logger;
+
+        public BlackoutBots(
+            MoreBotsServer.MoreBotsAPI moreBots,
+            MoreBotsServer.Services.MoreBotsCustomBotTypeService customBotTypeService,
+            MoreBotsServer.Services.FactionService factionService,
+            WTTServerCommonLib.WTTServerCommonLib commonLib,
+            DatabaseService databaseService,
+            ConfigServer configServer,
+            IReadOnlyList<SptMod> modList,
+            ISptLogger<BlackoutBots> logger)
+        {
+            _moreBots = moreBots;
+            _customBotTypeService = customBotTypeService;
+            _factionService = factionService;
+            _commonLib = commonLib;
+            _databaseService = databaseService;
+            _configServer = configServer;
+            _modList = modList;
+            _logger = logger;
+        }
+
+        public async Task OnLoad()
+        {
+            try
+            {
+                var assembly = Assembly.GetExecutingAssembly();
+
+                // soldiers from BlackDiv's shared type; the Wedge from our own type file
+                await _moreBots.LoadBotsShared(assembly, "blackDiv", new List<string> { SoldierName });
+                await _moreBots.LoadBots(assembly);
+
+                // the ScavRole -> display-name locales (db/CustomLocales), so the kill screen reads
+                // "The Wedge" / "Black Division" instead of the raw ScavRole key
+                await _commonLib.CustomLocaleService.CreateCustomLocales(assembly, null);
+
+                // the Wedge's own head/top/pants/voice (his ripped-live bundles), so he looks and
+                // sounds like himself rather than a generic Black Division leader
+                await _commonLib.CustomHeadService.CreateCustomHeads(assembly, null);
+                await _commonLib.CustomClothingService.CreateCustomClothing(assembly, null);
+                await _commonLib.CustomVoiceService.CreateCustomVoices(assembly, null);
+
+                _customBotTypeService.AddCustomWildSpawnTypeNames(new Dictionary<int, string>
+                {
+                    { WedgeSpawnType, WedgeName },
+                    { SoldierSpawnType, SoldierName },
+                });
+
+                // register how many of each to pre-generate per batch, else BotController warns
+                // "Unable to find a preset count" and falls back to 30. Wedge is a lone boss (few);
+                // the soldiers spawn in respawning waves, so cache a fuller batch like assault does.
+                var presetBatch = _configServer.GetConfig<BotConfig>().PresetBatch;
+                presetBatch[WedgeName] = 5;
+                presetBatch[SoldierName] = 30;
+
+                // base loadouts always (soldier weapons that exist without Armory); the Armory
+                // arsenal only when WTT-Armory is installed - BlackDiv's own graceful-degrade pattern
+                await _commonLib.CustomBotLoadoutService.CreateCustomBotLoadouts(assembly, null);
+                var hasArmory = _modList.Any(m => m.ModMetadata.ModGuid == ArmoryGuid);
+                if (hasArmory)
+                {
+                    await _commonLib.CustomBotLoadoutService.CreateCustomBotLoadouts(
+                        assembly, System.IO.Path.Combine("db", "ModBotLoadouts", "Armory"));
+                }
+
+                // hostility, both directions explicitly (the API's own consumers always do)
+                var mine = new[] { WedgeName, SoldierName };
+                foreach (var faction in EnemyFactions)
+                {
+                    _factionService.AddEnemyByFaction(mine, faction);
+                    _factionService.AddEnemyByFaction(faction, BlackoutFaction.FactionName);
+                }
+
+                // read the types back out of the database rather than trusting the calls
+                var bots = _databaseService.GetBots().Types;
+                var wedgeOk = bots.TryGetValue(WedgeName.ToLowerInvariant(), out var wedge);
+                var soldierOk = bots.ContainsKey(SoldierName.ToLowerInvariant());
+
+                // the Wedge's own head/top/pants/voice must actually be in the customization DB, else
+                // he spawns with a broken/missing appearance and nothing logs it
+                var cust = _databaseService.GetCustomization();
+                string[] wedgeAppearance = { "69985f0146e48aa39d06a701", "69985f0246e48aa39d06a702",
+                    "69985f0346e48aa39d06a703", "69985f0446e48aa39d06a704" };
+                var appearanceOk = wedgeAppearance.Count(id => cust.ContainsKey(new MongoId(id)));
+                var wedgeHp = wedgeOk
+                    ? (int)(wedge!.BotHealth?.BodyParts?.FirstOrDefault() is { } bp
+                        ? bp.Chest.Max + bp.Head.Max + bp.LeftArm.Max + bp.LeftLeg.Max
+                          + bp.RightArm.Max + bp.RightLeg.Max + bp.Stomach.Max
+                        : 0)
+                    : 0;
+
+                if (wedgeOk && soldierOk && appearanceOk == 4)
+                {
+                    _logger.Success($"[Blackout] Bots loaded: Wedge ('{WedgeName}', {wedgeHp} HP, own appearance) + soldiers " +
+                        $"('{SoldierName}'); Armory loadout: {(hasArmory ? "on" : "off (base weapons)")}; " +
+                        $"hostile to {EnemyFactions.Length} factions.");
+                }
+                else
+                {
+                    _logger.Error($"[Blackout] Bot load incomplete - Wedge={wedgeOk}, soldier={soldierOk}, " +
+                        $"Wedge appearance {appearanceOk}/4 in customization DB; " +
+                        "a silent skip means a bad type/customization file, check the WTT log above.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"[Blackout] Bot load failed: {ex}");
+            }
+        }
+    }
+
+    // Places the Wedge and Black Division on Labs as timed waves. Spawn data bakes into the location
+    // at generation time, so it is injected here and re-injected after every raid.
+    [Injectable(InjectionType.Singleton)]
+    public class BlackoutSpawnController
+    {
+        // Labs bot zones. BOTH gate zones (Gate1 z~-225, Gate2 z~-451) are sealed ramps at y~2.7 behind
+        // the power-gated doors - only Floor1/Floor2 are in the map's OpenZones. Bots in either gate zone
+        // get trapped, so Wedge and the squad each hold one open floor; waves roam both. Gates/basement unused.
+        private const string WedgeZone = "BotZoneFloor2";
+        private const string SquadZone = "BotZoneFloor1";
+        private const string WaveZones = "BotZoneFloor1,BotZoneFloor2";
+        private const string WedgeEscorts = "4,4,5,5"; // Wedge + 4-5 guards
+        private const string SquadEscorts = "3,3,4,4"; // a soldier lead + 3-4 = 4-5 per squad
+        private const int WaveIntervalSec = 120;
+        private const int WaveStopBeforeEndSec = 180;
+
+        private readonly DatabaseService _databaseService;
+        private readonly ISptLogger<BlackoutSpawnController> _logger;
+
+        public BlackoutSpawnController(DatabaseService databaseService, ISptLogger<BlackoutSpawnController> logger)
+        {
+            _databaseService = databaseService;
+            _logger = logger;
+        }
+
+        public int Inject()
+        {
+            var labs = _databaseService.GetLocations().Laboratory;
+            if (labs?.Base?.BossLocationSpawn == null)
+            {
+                _logger.Error("[Blackout] Labs location unavailable - Black Division not injected.");
+                return 0;
+            }
+
+            var spawns = labs.Base.BossLocationSpawn.ToList();
+            // ours are identified by boss type - the base Labs map only spawns pmcBot as bosses,
+            // so removing our two types is safe and makes re-injection idempotent
+            spawns.RemoveAll(s => s.BossName == BlackoutBots.WedgeName || s.BossName == BlackoutBots.SoldierName);
+
+            // Wedge leads 4-5 Black Division guards on one open floor, raid start
+            spawns.Add(Squad(BlackoutBots.WedgeName, BlackoutBots.SoldierName, WedgeEscorts, WedgeZone, time: -1, ignoreCap: true));
+            // a 4-5 Black Division squad on the other open floor (a soldier leads), raid start
+            spawns.Add(Squad(BlackoutBots.SoldierName, BlackoutBots.SoldierName, SquadEscorts, SquadZone, time: -1, ignoreCap: false));
+
+            // waves of Black Division across the map (client picks a zone from the list = never basement),
+            // one squad every couple minutes; they respect the bot cap so they throttle instead of piling up
+            var raidSec = (labs.Base.EscapeTimeLimit ?? 35) * 60;
+            var count = 0;
+            for (var t = WaveIntervalSec; t < raidSec - WaveStopBeforeEndSec; t += WaveIntervalSec)
+            {
+                spawns.Add(Squad(BlackoutBots.SoldierName, BlackoutBots.SoldierName, SquadEscorts, WaveZones, time: t, ignoreCap: false));
+                count++;
+            }
+
+            labs.Base.BossLocationSpawn = spawns;
+            return count;
+        }
+
+        // bossType leads a group of escortType. Wedge groups have BossName=bossWedge; pure squads
+        // use a soldier as the nominal boss so the group is all Black Division.
+        private static BossLocationSpawn Squad(string bossType, string escortType, string amount,
+            string zone, int time, bool ignoreCap)
+        {
+            return new BossLocationSpawn
+            {
+                BossName = bossType,
+                BossChance = 100,
+                BossDifficulty = "normal",
+                BossEscortType = escortType,
+                BossEscortAmount = amount,
+                BossEscortDifficulty = "normal",
+                BossZone = zone,
+                Time = time,
+                IsBossPlayer = false,
+                IsRandomTimeSpawn = false,
+                Delay = 0,
+                ForceSpawn = false,
+                IgnoreMaxBots = ignoreCap,
+                SpawnMode = ["regular", "pve"],
+            };
+        }
+    }
+
+    [Injectable(TypePriority = MoreBotsServer.MoreBotsLoadOrder.LoadBots + 2)]
+    public class BlackoutSpawns : IOnLoad
+    {
+        private readonly BlackoutSpawnController _controller;
+        private readonly ISptLogger<BlackoutSpawns> _logger;
+
+        public BlackoutSpawns(BlackoutSpawnController controller, ISptLogger<BlackoutSpawns> logger)
+        {
+            _controller = controller;
+            _logger = logger;
+        }
+
+        public Task OnLoad()
+        {
+            try
+            {
+                var waves = _controller.Inject();
+                _logger.Success($"[Blackout] Black Division on Labs: Wedge + gate squad at raid start, {waves} timed waves.");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"[Blackout] Spawn injection failed: {ex}");
+            }
+            return Task.CompletedTask;
+        }
+    }
+
+    // Spawn data is rebuilt per raid, so re-inject once the previous one ends.
+    [Injectable]
+    public class BlackoutRaidEndRouter : StaticRouter
+    {
+        private static BlackoutSpawnController _controller = null!;
+
+        public BlackoutRaidEndRouter(JsonUtil jsonUtil, BlackoutSpawnController controller)
+            : base(jsonUtil, GetRoutes())
+        {
+            _controller = controller;
+        }
+
+        private static List<RouteAction> GetRoutes()
+        {
+            return new List<RouteAction>
+            {
+                new RouteAction("/client/match/local/end",
+                    async (url, info, sessionID, output) =>
+                    {
+                        _controller.Inject();
+                        return await new ValueTask<object>(output ?? string.Empty);
+                    }, null),
+            };
         }
     }
 }

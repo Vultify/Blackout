@@ -80,6 +80,31 @@
         "cubemaps",
         "shaders"
       ]
+    },
+    {
+      "key": "assets/content/characters/character/prefabs/head_boss_wedge.bundle",
+      "dependencyKeys": [
+        "cubemaps",
+        "shaders"
+      ]
+    },
+    {
+      "key": "assets/content/characters/character/prefabs/top_boss_wedge.bundle",
+      "dependencyKeys": [
+        "cubemaps",
+        "shaders"
+      ]
+    },
+    {
+      "key": "assets/content/characters/character/prefabs/pants_boss_wedge.bundle",
+      "dependencyKeys": [
+        "cubemaps",
+        "shaders"
+      ]
+    },
+    {
+      "key": "assets/content/audio/phrases/boss_wedge_voice.bundle",
+      "dependencyKeys": []
     }
   ]
 }
