@@ -129,18 +129,13 @@ namespace BlackoutServer
                 AddToSlot(items, Mp7a1, "mod_muzzle", Sf3pMuzzle);
                 AddToSlot(items, Mp7a2, "mod_muzzle", Sf3pMuzzle);
                 // the SF3P's own mod_muzzle accepts the SOCOM556 suppressors, not the inherited MP7 Rotex.
-                // Required: the bot generator hard-rewrites mod_muzzle spawn chance to 95 the moment a
-                // muzzle device installs (AdjustSlotSpawnChances), so a chance-100 nested suppressor can
-                // still silently miss - a required slot bypasses the roll and always resolves from the filter
-                var sf3pSlot = FindSlot(items, Sf3pMuzzle, "mod_muzzle");
-                if (sf3pSlot != null)
+                // NOT _required - the gunsmith paints a required-but-empty slot red (no vanilla muzzle
+                // device requires its can); the Wedge's always-on suppressor is enforced per-role in
+                // BlackoutBots instead, where only bot generation can see it
+                var sf3pMuzzleSlot = FindSlot(items, Sf3pMuzzle, "mod_muzzle")?.Properties?.Filters?.FirstOrDefault();
+                if (sf3pMuzzleSlot != null)
                 {
-                    sf3pSlot.Required = true;
-                    var sf3pMuzzleFilter = sf3pSlot.Properties?.Filters?.FirstOrDefault();
-                    if (sf3pMuzzleFilter != null)
-                    {
-                        sf3pMuzzleFilter.Filter = new HashSet<MongoId>(Socom556Suppressors.Select(id => new MongoId(id)));
-                    }
+                    sf3pMuzzleSlot.Filter = new HashSet<MongoId>(Socom556Suppressors.Select(id => new MongoId(id)));
                 }
                 // the black AN/PEQ-15 goes in every MP7 tactical slot (all three, so it mounts anywhere the
                 // vanilla one does) - without this the gunsmith rejects it since it's a new backport id
@@ -188,9 +183,10 @@ namespace BlackoutServer
                 var coverSlot = SlotContains(items, WedgeBlackExfilHelmet, "mod_equipment_002", WedgeCoverHelmet);
                 var comtacMounted = SlotContains(items, BlackExfilHelmet, "mod_equipment_000", ComTacVIBlack);
                 // the two filter patches the gunsmith AND bot generation both depend on - assert the
-                // written state, a silent FindSlot miss here is exactly how a suppressor vanishes
+                // written state, a silent FindSlot miss here is exactly how a suppressor vanishes.
+                // Required must stay FALSE or the gunsmith flags a bare SF3P as an incomplete part
                 var socomOnSf3p = SlotContains(items, Sf3pMuzzle, "mod_muzzle", Socom556Suppressors[0])
-                    && FindSlot(items, Sf3pMuzzle, "mod_muzzle")?.Required == true;
+                    && FindSlot(items, Sf3pMuzzle, "mod_muzzle")?.Required != true;
                 var peqOnMp7 = SlotContains(items, Mp7a1, "mod_tactical_000", AnPeq15Black);
 
                 // read the rig's real state back out of the database rather than trusting the JSON
@@ -416,9 +412,21 @@ namespace BlackoutServer
                 // register how many of each to pre-generate per batch, else BotController warns
                 // "Unable to find a preset count" and falls back to 30. Wedge is a lone boss (few);
                 // the soldiers spawn in respawning waves, so cache a fuller batch like assault does.
-                var presetBatch = _configServer.GetConfig<BotConfig>().PresetBatch;
-                presetBatch[WedgeName] = 5;
-                presetBatch[SoldierName] = 30;
+                var botConfig = _configServer.GetConfig<BotConfig>();
+                botConfig.PresetBatch[WedgeName] = 5;
+                botConfig.PresetBatch[SoldierName] = 30;
+
+                // the Wedge's suppressor must never roll off: the generator rewrites mod_muzzle chance
+                // to 95 once a muzzle device installs, and a failed roll on a role-required slot falls
+                // back to the bot's own mod pool (the SOCOM). Per-role config, so the gunsmith never
+                // sees a required slot on the SF3P item itself
+                if (!botConfig.Equipment.TryGetValue(WedgeName.ToLowerInvariant(), out var wedgeEquip) || wedgeEquip == null)
+                {
+                    wedgeEquip = new EquipmentFilters();
+                    botConfig.Equipment[WedgeName.ToLowerInvariant()] = wedgeEquip;
+                }
+                wedgeEquip.WeaponSlotIdsToMakeRequired ??= new HashSet<string>();
+                wedgeEquip.WeaponSlotIdsToMakeRequired.Add("mod_muzzle");
 
                 // base loadouts always (soldier weapons that exist without Armory); the Armory
                 // arsenal only when WTT-Armory is installed - BlackDiv's own graceful-degrade pattern
