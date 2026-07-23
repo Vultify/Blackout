@@ -38,13 +38,13 @@ namespace BlackoutPrepatch
             // scavRole is the raid-end / kill-screen role label (needs a matching locale, added server-side).
             // Wedge gets his own role so he reads "The Wedge"; soldiers read "Black Division".
             // DifficultyModifier is SAIN's combat-skill dial. The Wedge fights boss-grade (.9); the guards
-            // and wave soldiers match BlackDiv, which leaves it at SAIN's default (.5).
+            // and wave soldiers sit at raider grade (.75), a step above SAIN's default
             Register(assembly, WedgeSpawnType, "bossWedge", "Wedge", "The Wedge",
                 "Black Division's commander, holding Labs through the blackout.",
                 isBoss: true, isFollower: false, difficultyModifier: 0.9f);
             Register(assembly, SoldierSpawnType, "blackDivAssault", "BlackDiv", "Black Division",
                 "A Black Division operative holding Labs.",
-                isBoss: true, isFollower: true, difficultyModifier: 0.5f);
+                isBoss: true, isFollower: true, difficultyModifier: 0.75f);
 
             // one group for all of ours - lets Wedge lead the soldiers as escorts
             CustomWildSpawnTypeManager.AddSuitableGroup(new List<int> { WedgeSpawnType, SoldierSpawnType });
