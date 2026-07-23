@@ -1579,6 +1579,9 @@ namespace Blackout
                 }
                 door.KeyId = BlackoutKeyTemplateId;
                 door.DoorState = EFT.Interactive.EDoorState.Locked;
+                // the arsenal only opens with its key, kicking it in stays off the menu
+                door.CanBeBreached = false;
+                door.CanInteractWithBreach = false;
                 // scenes can leave the door physically ajar, snap the hinge to its closed angle
                 door.CurrentAngle = door.GetAngle(EFT.Interactive.EDoorState.Locked);
                 locked++;
