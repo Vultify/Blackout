@@ -12,7 +12,11 @@ using UnityEngine.Audio;
 
 namespace Blackout
 {
-    [BepInPlugin("com.vultify.blackout", "Blackout", "0.0.5")]
+    [BepInPlugin("com.vultify.blackout", "Blackout", "0.0.6")]
+    // the client half of WTT-CommonLib and WTT-ContentBackport must be present, or the Wedge's gear and
+    // the Admin key resolve to nothing client-side. hard-depend so a missing half errors clearly
+    [BepInDependency("com.wtt.commonlib", BepInDependency.DependencyFlags.HardDependency)]
+    [BepInDependency("com.wtt.contentbackport", BepInDependency.DependencyFlags.HardDependency)]
     public class BlackoutPlugin : BaseUnityPlugin
     {
         private const string LabsLocationId = "laboratory";
@@ -57,24 +61,20 @@ namespace Blackout
         private static readonly Vector3 WhiteboardPos = new Vector3(-135.766f, 0.119f, -335.513f);
         private static readonly Quaternion WhiteboardRot = new Quaternion(-0.5f, -0.5f, -0.5f, 0.5f);
 
+        // the only F12 option: a master on/off. everything else is fixed at the values tuned against
+        // the live event, so the menu stays a single toggle
         private ConfigEntry<bool> _modEnabled;
-        private ConfigEntry<bool> _labsOnly;
-        private ConfigEntry<float> _delaySeconds;
-        private ConfigEntry<float> _ambientLevel;
-        private ConfigEntry<float> _emergencyIntensity;
-        private ConfigEntry<float> _soundVolume;
-        private ConfigEntry<bool> _announcementEnabled;
-        private ConfigEntry<float> _announcementDelay;
-        private ConfigEntry<bool> _subtitleEnabled;
-        private ConfigEntry<string> _subtitleTextCfg;
-        private ConfigEntry<KeyboardShortcut> _inspectDoorKey;
-        private ConfigEntry<bool> _showBotNames;
 
-        // our custom WildSpawnType values, registered by the prepatcher (see BlackoutPrepatch).
-        // a bot whose Role is one of these IS that type, whatever gear it rolled
-        private const int WedgeSpawnType = 868588;
-        private const int SoldierSpawnType = 868589;
-        private GUIStyle _nameplateStyle;
+        private const bool LabsOnly = true;   // Labs only, no other map
+        private const float DelaySeconds = 15f;
+        private const float AmbientLevel = 0f;   // full black, like the live event
+        private const float EmergencyIntensity = 1.2f;
+        private const float SoundVolume = 0.8f;
+        private const bool AnnouncementEnabled = true;
+        private const float AnnouncementDelay = 2f;
+        private const bool SubtitleEnabled = true;
+        private const string SubtitleText =
+            "The facility has been switched to emergency power. Please remain where you are and await evacuation.";
 
         private bool _inRaid;
         private bool _doorsLocked;
@@ -173,82 +173,6 @@ namespace Blackout
                 "Enable Mod",
                 true,
                 "Master toggle - enables or disables the entire mod");
-
-            _labsOnly = Config.Bind(
-                "1. General",
-                "Labs Only",
-                true,
-                "Only trigger the blackout on The Lab (like the live event). Disable to black out every map");
-
-            _delaySeconds = Config.Bind(
-                "2. Blackout",
-                "Delay",
-                15f,
-                new ConfigDescription(
-                    "Seconds after you gain control before the power goes out",
-                    new AcceptableValueRange<float>(0f, 120f)));
-
-            _ambientLevel = Config.Bind(
-                "2. Blackout",
-                "Ambient Level",
-                0f,
-                new ConfigDescription(
-                    "Fraction of the map's normal ambient light kept during the blackout. 0 is live-event black, small values bring back a hint of visibility. Applies live",
-                    new AcceptableValueRange<float>(0f, 1f)));
-
-            _emergencyIntensity = Config.Bind(
-                "2. Blackout",
-                "Emergency Lights",
-                1.2f,
-                new ConfigDescription(
-                    "Brightness of the live event's amber emergency floods (Labs only, spawned at the real event positions). 0 switches them off. Applies live",
-                    new AcceptableValueRange<float>(0f, 3f)));
-
-            _soundVolume = Config.Bind(
-                "3. Sound",
-                "Volume",
-                0.8f,
-                new ConfigDescription(
-                    "Volume of the blackout sound and announcement",
-                    new AcceptableValueRange<float>(0f, 1f)));
-
-            _announcementEnabled = Config.Bind(
-                "3. Sound",
-                "Intercom Announcement",
-                true,
-                "Play the event's Announcement System voice line after the power goes out");
-
-            _announcementDelay = Config.Bind(
-                "3. Sound",
-                "Announcement Delay",
-                2f,
-                new ConfigDescription(
-                    "Seconds after the blackout before the intercom announcement plays",
-                    new AcceptableValueRange<float>(0f, 60f)));
-
-            _subtitleEnabled = Config.Bind(
-                "3. Sound",
-                "Announcement Subtitle",
-                true,
-                "Show the Announcement System text box on screen while the intercom voice plays");
-
-            _subtitleTextCfg = Config.Bind(
-                "3. Sound",
-                "Subtitle Text",
-                "The facility has been switched to emergency power. Please remain where you are and await evacuation.",
-                "Text shown in the Announcement System box while the intercom voice plays");
-
-            _inspectDoorKey = Config.Bind(
-                "4. Debug",
-                "Inspect Door Key",
-                new KeyboardShortcut(KeyCode.F10),
-                "Aim at a door and press to log its scene Id, key requirement and state - used to pick doors for the lock feature");
-
-            _showBotNames = Config.Bind(
-                "4. Debug",
-                "Show Bot Names",
-                false,
-                "Floating role + name tag above every AI in raid, so you can pick the Wedge (orange) and his Black Division (yellow) out of the crowd. Debug aid - leave off for normal play");
 
             LoadSoundBundle();
 
@@ -676,7 +600,7 @@ namespace Blackout
             _inRaid = true;
 
             if (!_doorsLocked && _modEnabled.Value
-                && (!_labsOnly.Value || gameWorld.LocationId == LabsLocationId))
+                && (!LabsOnly || gameWorld.LocationId == LabsLocationId))
             {
                 _doorsLocked = true;
                 LockEventDoors();
@@ -684,7 +608,7 @@ namespace Blackout
 
             // exfil points initialize later in the load than doors do - poll until they exist
             if (!_exfilsDumped && _modEnabled.Value
-                && (!_labsOnly.Value || gameWorld.LocationId == LabsLocationId))
+                && (!LabsOnly || gameWorld.LocationId == LabsLocationId))
             {
                 _exfilsDumped = DumpExfils();
             }
@@ -725,11 +649,6 @@ namespace Blackout
                 }
             }
 
-            if (_inspectDoorKey.Value.IsDown())
-            {
-                InspectAimedDoor();
-            }
-
             if (!_modEnabled.Value)
             {
                 if (_blackoutActive)
@@ -742,21 +661,21 @@ namespace Blackout
             if (_blackoutActive)
             {
                 EnforceBlackout();
-                if (!_announcementPlayed && _announcementEnabled.Value
+                if (!_announcementPlayed && AnnouncementEnabled
                     && _announcerClip != null && Time.time >= _announcementAt)
                 {
                     _announcementPlayed = true;
                     PlayAnnouncement();
-                    if (_subtitleEnabled.Value && !string.IsNullOrWhiteSpace(_subtitleTextCfg.Value))
+                    if (SubtitleEnabled && !string.IsNullOrWhiteSpace(SubtitleText))
                     {
-                        _subtitleText = _subtitleTextCfg.Value;
+                        _subtitleText = SubtitleText;
                         _subtitleUntil = Time.time + _announcerClip.length + 0.5f;
                     }
                 }
                 return;
             }
 
-            if (_labsOnly.Value && gameWorld.LocationId != LabsLocationId)
+            if (LabsOnly && gameWorld.LocationId != LabsLocationId)
             {
                 return;
             }
@@ -795,7 +714,7 @@ namespace Blackout
                     return;
                 }
                 _clockStarted = true;
-                _blackoutAt = Time.time + _delaySeconds.Value;
+                _blackoutAt = Time.time + DelaySeconds;
                 // resolve the mixer group now rather than on the cut frame, it scans every
                 // loaded AudioMixerGroup and there are seconds to spare before the lights go
                 FindAmbientMixerGroup();
@@ -814,7 +733,7 @@ namespace Blackout
         {
             _blackoutActive = true;
             _announcementPlayed = false;
-            _announcementAt = Time.time + _announcementDelay.Value;
+            _announcementAt = Time.time + AnnouncementDelay;
 
             _originalAmbientIntensity = RenderSettings.ambientIntensity;
             _originalAmbientLight = RenderSettings.ambientLight;
@@ -890,7 +809,7 @@ namespace Blackout
                 light.range = spec.Range;
                 light.spotAngle = spec.SpotAngle;
                 light.shadows = LightShadows.None;
-                light.intensity = _emergencyIntensity.Value;
+                light.intensity = EmergencyIntensity;
                 _emergencyLights.Add(light);
             }
             Logger.LogInfo($"[Blackout] {_emergencyLights.Count} emergency lights spawned (live level711 poses)");
@@ -929,11 +848,11 @@ namespace Blackout
                     _origNvGround = settings.NightVisionGroundColor;
                     _origNvIntensity = settings.NightVisionAmbientIntensity;
                     _ambientKilled = true;
-                    Logger.LogInfo($"[Blackout] LevelSettings ambient taken over (level {_ambientLevel.Value:0.00})");
+                    Logger.LogInfo($"[Blackout] LevelSettings ambient taken over (level {AmbientLevel:0.00})");
                 }
 
                 // scaled from the saved originals every frame - the F12 slider applies live
-                var keep = _ambientLevel.Value;
+                var keep = AmbientLevel;
                 settings.SkyColor = _origAmbSky * keep;
                 settings.EquatorColor = _origAmbEquator * keep;
                 settings.GroundColor = _origAmbGround * keep;
@@ -1015,9 +934,9 @@ namespace Blackout
             // the F12 slider applies live; 0 switches them off without despawning
             foreach (var emergency in _emergencyLights)
             {
-                if (emergency != null && emergency.intensity != _emergencyIntensity.Value)
+                if (emergency != null && emergency.intensity != EmergencyIntensity)
                 {
-                    emergency.intensity = _emergencyIntensity.Value;
+                    emergency.intensity = EmergencyIntensity;
                 }
             }
 
@@ -1325,85 +1244,8 @@ namespace Blackout
             Logger.LogInfo("[Blackout] Power restored (mod disabled mid-raid)");
         }
 
-        // debug ESP: a role + name tag floating over every AI, projected head-height to screen.
-        // the role is the ground truth (a bossWedge tag is the Wedge no matter what gear he rolled),
-        // so this is how we confirm he's actually spawning and what he's wearing before we chase bugs
-        private void DrawBotNameplates()
-        {
-            var gameWorld = Singleton<GameWorld>.Instance;
-            var players = gameWorld?.AllAlivePlayersList;
-            var cam = Camera.main;
-            if (players == null || cam == null)
-            {
-                return;
-            }
-
-            if (_nameplateStyle == null)
-            {
-                _nameplateStyle = new GUIStyle
-                {
-                    alignment = TextAnchor.MiddleCenter,
-                    fontSize = 14,
-                    fontStyle = FontStyle.Bold,
-                };
-            }
-
-            foreach (var player in players)
-            {
-                if (player == null || player.IsYourPlayer
-                    || player.HealthController?.IsAlive != true)
-                {
-                    continue;
-                }
-
-                var headWorld = player.Position + Vector3.up * 1.85f;
-                var sp = cam.WorldToScreenPoint(headWorld);
-                if (sp.z <= 0f)
-                {
-                    continue; // behind the camera - WorldToScreenPoint mirrors these onto screen
-                }
-
-                var role = player.Profile?.Info?.Settings?.Role;
-                var roleVal = role.HasValue ? (int)role.Value : -1;
-                var nick = player.Profile?.Info?.Nickname ?? "";
-
-                string label;
-                Color col;
-                if (roleVal == WedgeSpawnType)
-                {
-                    label = "THE WEDGE";
-                    col = new Color(1f, 0.5f, 0.1f);
-                }
-                else if (roleVal == SoldierSpawnType)
-                {
-                    label = "Black Division";
-                    col = new Color(1f, 0.85f, 0.3f);
-                }
-                else
-                {
-                    label = role.HasValue ? role.Value.ToString() : "?";
-                    col = new Color(0.82f, 0.86f, 0.95f);
-                }
-
-                var dist = Vector3.Distance(cam.transform.position, headWorld);
-                var text = string.IsNullOrEmpty(nick) ? $"{label}  {dist:0}m" : $"{label}  [{nick}]  {dist:0}m";
-                var size = _nameplateStyle.CalcSize(new GUIContent(text));
-                var rect = new Rect(sp.x - size.x / 2f, Screen.height - sp.y - size.y, size.x, size.y);
-
-                _nameplateStyle.normal.textColor = Color.black;
-                GUI.Label(new Rect(rect.x + 1f, rect.y + 1f, rect.width, rect.height), text, _nameplateStyle);
-                _nameplateStyle.normal.textColor = col;
-                GUI.Label(rect, text, _nameplateStyle);
-            }
-        }
-
         private void OnGUI()
         {
-            if (_showBotNames != null && _showBotNames.Value && _inRaid)
-            {
-                DrawBotNameplates();
-            }
-
             if (_keypadDoor != null)
             {
                 KeypadGui();
@@ -1457,7 +1299,7 @@ namespace Blackout
 
         private void PlayPowerDownSound()
         {
-            if (_powerDownClip == null || _soundVolume.Value <= 0f)
+            if (_powerDownClip == null || SoundVolume <= 0f)
             {
                 return;
             }
@@ -1465,14 +1307,14 @@ namespace Blackout
             var guiSounds = Singleton<EFT.UI.GUISounds>.Instance;
             if (guiSounds != null)
             {
-                guiSounds.PlaySound(_powerDownClip, false, false, _soundVolume.Value);
+                guiSounds.PlaySound(_powerDownClip, false, false, SoundVolume);
                 return;
             }
 
             var go = new GameObject("BlackoutSound");
             var source = go.AddComponent<AudioSource>();
             source.spatialBlend = 0f;
-            source.volume = _soundVolume.Value;
+            source.volume = SoundVolume;
             source.clip = _powerDownClip;
             source.Play();
             Destroy(go, _powerDownClip.length + 1f);
@@ -1480,7 +1322,7 @@ namespace Blackout
 
         private void PlayAnnouncement()
         {
-            if (_announcerClip == null || _soundVolume.Value <= 0f)
+            if (_announcerClip == null || SoundVolume <= 0f)
             {
                 return;
             }
@@ -1534,7 +1376,7 @@ namespace Blackout
                 speaker.minDistance = 15f;
                 speaker.maxDistance = 80f;
                 speaker.rolloffMode = AudioRolloffMode.Linear;
-                speaker.volume = 0.58f * _soundVolume.Value;
+                speaker.volume = 0.58f * SoundVolume;
                 speaker.Play();
                 Destroy(go, _announcerClip.length + 1f);
             }
@@ -2114,67 +1956,6 @@ namespace Blackout
                     Logger.LogWarning($"[Blackout] Gate activation failed for {name}: {ex.Message}");
                 }
             }
-        }
-
-        private void InspectAimedDoor()
-        {
-            var cam = Camera.main;
-            if (cam == null)
-            {
-                return;
-            }
-            // long reach for ceilings; ignore trigger volumes (spawn/quest zones swallow the ray)
-            var hits = Physics.RaycastAll(cam.transform.position, cam.transform.forward, 60f,
-                Physics.AllLayers, QueryTriggerInteraction.Ignore);
-            Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-            EFT.Interactive.WorldInteractiveObject wio = null;
-            foreach (var h in hits)
-            {
-                var candidate = h.collider.GetComponentInParent<EFT.Interactive.WorldInteractiveObject>();
-                if (candidate != null)
-                {
-                    wio = candidate;
-                    break;
-                }
-            }
-            if (wio == null)
-            {
-                foreach (var h in hits)
-                {
-                    // skip bodies, we want static geometry for switch placement
-                    if (h.collider.GetComponentInParent<Player>() != null)
-                    {
-                        continue;
-                    }
-                    Logger.LogInfo($"[Blackout DOOR] surface point={h.point} normal={h.normal} on '{h.collider.name}' (for switch placement)");
-                    // material recon for tracking down still-glowing emissive surfaces
-                    var rends = h.collider.GetComponentsInChildren<Renderer>(true);
-                    if (rends.Length == 0 && h.collider.transform.parent != null)
-                    {
-                        rends = h.collider.transform.parent.GetComponentsInChildren<Renderer>(true);
-                    }
-                    foreach (var rend in rends)
-                    {
-                        foreach (var m in rend.sharedMaterials)
-                        {
-                            if (m != null)
-                            {
-                                Logger.LogInfo($"[Blackout DOOR] renderer '{rend.gameObject.name}' material '{m.name}' shader '{(m.shader != null ? m.shader.name : "null")}'");
-                            }
-                        }
-                    }
-                    return;
-                }
-                Logger.LogInfo("[Blackout DOOR] nothing static within 8m");
-                return;
-            }
-            var path = wio.gameObject.name;
-            var t = wio.transform.parent;
-            for (var i = 0; i < 6 && t != null; i++, t = t.parent)
-            {
-                path = t.name + "/" + path;
-            }
-            Logger.LogInfo($"[Blackout DOOR] type={wio.GetType().Name} id='{wio.Id}' keyId='{wio.KeyId}' state={wio.DoorState} operatable={wio.Operatable} pos={wio.transform.position} :: {path}");
         }
 
         private void LoadSoundBundle()

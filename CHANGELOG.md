@@ -4,6 +4,15 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-07-23
+### Changed
+- F12 menu is now a single Enable Mod toggle; every other setting is fixed at the value tuned against the live event
+- The blackout is Labs-only, baked in - it no longer runs on any other map
+### Removed
+- The debug tools (door-inspector hotkey and the bot-name ESP overlay) are gone
+### Fixed
+- The client plugin now hard-depends on WTT-CommonLib and WTT-ContentBackport, so a missing client half throws a clear BepInEx error instead of leaving the Wedge's gear and the arsenal key invisible
+
 ## [0.0.5] - 2026-07-23
 ### Added
 - Labs goes dark 15 seconds after you start moving - scene lights killed plus a fixed exposure drop, tuned round by round against live event footage
