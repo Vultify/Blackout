@@ -305,8 +305,8 @@ namespace BlackoutServer
         }
     }
 
-    // The Wedge's own faction. He is our MoreBotsAPI boss type (not the separate BlackDiv mod), so we
-    // register the faction ourselves. Runs at LoadFactions so it exists before any hostility wiring.
+    // The Wedge and his guards share this faction, so they never fight each other. We register it
+    // ourselves at LoadFactions so it exists before any hostility wiring.
     [Injectable(TypePriority = MoreBotsServer.MoreBotsLoadOrder.LoadFactions + 1)]
     public class BlackoutFaction : IOnLoad
     {
@@ -327,6 +327,7 @@ namespace BlackoutServer
             {
                 var faction = new Faction { Name = FactionName, RevengeAfterRaids = false };
                 faction.BotTypes.Add((WildSpawnType)BlackoutBots.WedgeSpawnType);
+                faction.BotTypes.Add((WildSpawnType)BlackoutBots.GuardSpawnType);
                 _factionService.Factions[FactionName] = faction;
                 _logger.Success($"[Blackout] Faction '{FactionName}' registered ({faction.BotTypes.Count} types).");
             }
@@ -338,16 +339,20 @@ namespace BlackoutServer
         }
     }
 
-    // Creates the Wedge boss bot type and wires his gear and hostility. He uses our own type with our
-    // 9 backported gear items, and spawns solo - Black Division troops come from the separate BlackDiv
-    // mod, which the Wedge is set friendly toward so they hold Labs together.
+    // Creates the Wedge boss and his Black Division Guard escorts, and wires their gear and hostility.
+    // The Wedge uses our own type with our 9 backported gear items; the guards use our own type
+    // ('blackDivGuard') off the recovered BlackDiv-style loadout. Both are also set friendly toward the
+    // separate BlackDiv mod so everyone holds Labs together.
     [Injectable(TypePriority = MoreBotsServer.MoreBotsLoadOrder.LoadBots + 1)]
     public class BlackoutBots : IOnLoad
     {
         public const int WedgeSpawnType = 868588;
+        public const int GuardSpawnType = 868589;
         public const string WedgeName = "bossWedge";
+        public const string GuardName = "blackDivGuard";
 
-        // the separate BlackDiv mod's faction - the Wedge is set friendly toward it when present
+        private const string ArmoryGuid = "com.wtt.armory";
+        // the separate BlackDiv mod's faction - our bots are set friendly toward it when present
         private const string BlackDivFaction = "blackdiv";
         private static readonly string[] EnemyFactions = { "savage", "rogues", "usec", "bear", "infected" };
 
@@ -357,6 +362,7 @@ namespace BlackoutServer
         private readonly WTTServerCommonLib.WTTServerCommonLib _commonLib;
         private readonly DatabaseService _databaseService;
         private readonly ConfigServer _configServer;
+        private readonly IReadOnlyList<SptMod> _modList;
         private readonly ISptLogger<BlackoutBots> _logger;
 
         public BlackoutBots(
@@ -366,6 +372,7 @@ namespace BlackoutServer
             WTTServerCommonLib.WTTServerCommonLib commonLib,
             DatabaseService databaseService,
             ConfigServer configServer,
+            IReadOnlyList<SptMod> modList,
             ISptLogger<BlackoutBots> logger)
         {
             _moreBots = moreBots;
@@ -374,6 +381,7 @@ namespace BlackoutServer
             _commonLib = commonLib;
             _databaseService = databaseService;
             _configServer = configServer;
+            _modList = modList;
             _logger = logger;
         }
 
@@ -383,11 +391,12 @@ namespace BlackoutServer
             {
                 var assembly = Assembly.GetExecutingAssembly();
 
-                // the Wedge from our own type file (db/bots/types/bosswedge.json)
+                // both our types from db/bots/types + db/bots/config: the Wedge (bosswedge) and his
+                // guards (blackdivguard, off the recovered BlackDiv-style loadout)
                 await _moreBots.LoadBots(assembly);
 
                 // the ScavRole -> display-name locale (db/CustomLocales), so the kill screen reads
-                // "The Wedge" instead of the raw ScavRole key
+                // "Black Div" instead of the raw ScavRole key
                 await _commonLib.CustomLocaleService.CreateCustomLocales(assembly, null);
 
                 // the Wedge's own head/top/pants/voice (his ripped-live bundles), so he looks and
@@ -399,11 +408,14 @@ namespace BlackoutServer
                 _customBotTypeService.AddCustomWildSpawnTypeNames(new Dictionary<int, string>
                 {
                     { WedgeSpawnType, WedgeName },
+                    { GuardSpawnType, GuardName },
                 });
 
-                // the Wedge spawns solo, so this is a single-bot cache with no parallel generation
+                // keep both at 1: the Wedge is a lone boss, and a 4-5 guard escort already generates the
+                // group in parallel - a higher batch just inflates that burst into the shared-pool race
                 var botConfig = _configServer.GetConfig<BotConfig>();
                 botConfig.PresetBatch[WedgeName] = 1;
+                botConfig.PresetBatch[GuardName] = 1;
 
                 // the Wedge's suppressor must never roll off: the generator rewrites mod_muzzle chance
                 // to 95 once a muzzle device installs, and a failed roll on a role-required slot falls
@@ -417,9 +429,19 @@ namespace BlackoutServer
                 wedgeEquip.WeaponSlotIdsToMakeRequired ??= new HashSet<string>();
                 wedgeEquip.WeaponSlotIdsToMakeRequired.Add("mod_muzzle");
 
+                // the guard's loadout: base always (BlackDiv-style weapons that exist without Armory),
+                // the Armory arsenal only when WTT-Armory is installed - BlackDiv's graceful-degrade pattern
+                await _commonLib.CustomBotLoadoutService.CreateCustomBotLoadouts(assembly, null);
+                var hasArmory = _modList.Any(m => m.ModMetadata.ModGuid == ArmoryGuid);
+                if (hasArmory)
+                {
+                    await _commonLib.CustomBotLoadoutService.CreateCustomBotLoadouts(
+                        assembly, System.IO.Path.Combine("db", "ModBotLoadouts", "Armory"));
+                }
+
                 // hostility, both directions explicitly (the API's own consumers always do). the Wedge
-                // fights the player (usec/bear), scavs and rogues - everyone except Black Division.
-                var mine = new[] { WedgeName };
+                // and his guards fight the player (usec/bear), scavs and rogues - everyone except Black Division.
+                var mine = new[] { WedgeName, GuardName };
                 foreach (var faction in EnemyFactions)
                 {
                     _factionService.AddEnemyByFaction(mine, faction);
@@ -438,9 +460,10 @@ namespace BlackoutServer
                     _logger.Info($"[Blackout] BlackDiv friendliness not wired (mod not present?): {ex.Message}");
                 }
 
-                // read the type back out of the database rather than trusting the call
+                // read the types back out of the database rather than trusting the calls
                 var bots = _databaseService.GetBots().Types;
                 var wedgeOk = bots.TryGetValue(WedgeName.ToLowerInvariant(), out var wedge);
+                var guardOk = bots.ContainsKey(GuardName.ToLowerInvariant());
 
                 // the Wedge's own head/top/pants/voice must actually be in the customization DB, else
                 // he spawns with a broken/missing appearance and nothing logs it
@@ -455,15 +478,16 @@ namespace BlackoutServer
                         : 0)
                     : 0;
 
-                if (wedgeOk && appearanceOk == 4)
+                if (wedgeOk && guardOk && appearanceOk == 4)
                 {
-                    _logger.Success($"[Blackout] Wedge loaded ('{WedgeName}', {wedgeHp} HP, own appearance); " +
-                        $"spawns solo; hostile to {EnemyFactions.Length} factions, friendly to Black Division.");
+                    _logger.Success($"[Blackout] Wedge ('{WedgeName}', {wedgeHp} HP, own appearance) + guards " +
+                        $"('{GuardName}'); Armory loadout: {(hasArmory ? "on" : "off (base weapons)")}; " +
+                        $"hostile to {EnemyFactions.Length} factions, friendly to Black Division.");
                 }
                 else
                 {
-                    _logger.Error($"[Blackout] Wedge load incomplete - type={wedgeOk}, " +
-                        $"appearance {appearanceOk}/4 in customization DB; " +
+                    _logger.Error($"[Blackout] Bot load incomplete - Wedge={wedgeOk}, guard={guardOk}, " +
+                        $"Wedge appearance {appearanceOk}/4 in customization DB; " +
                         "a silent skip means a bad type/customization file, check the WTT log above.");
                 }
             }
@@ -474,15 +498,16 @@ namespace BlackoutServer
         }
     }
 
-    // Places the Wedge on Labs. Spawn data bakes into the location at generation time, so it is
-    // injected here and re-injected after every raid.
+    // Places the Wedge and his guards on Labs. Spawn data bakes into the location at generation time,
+    // so it is injected here and re-injected after every raid.
     [Injectable(InjectionType.Singleton)]
     public class BlackoutSpawnController
     {
         // BOTH gate zones (Gate1 z~-225, Gate2 z~-451) are sealed ramps behind the power-gated doors -
-        // only Floor1/Floor2 are in the map's OpenZones, so the Wedge holds an open floor. He roams from
-        // there; Black Division troops (separate mod) cover the rest of the map.
+        // only Floor1/Floor2 are in the map's OpenZones, so the Wedge holds an open floor. He and his
+        // guards roam from there; no waves.
         private const string WedgeZone = "BotZoneFloor2";
+        private const string GuardEscorts = "4,4,5,5"; // Wedge + 4-5 guards
 
         private readonly DatabaseService _databaseService;
         private readonly ISptLogger<BlackoutSpawnController> _logger;
@@ -507,14 +532,14 @@ namespace BlackoutServer
             // Wedge is safe and makes re-injection idempotent
             spawns.RemoveAll(s => s.BossName == BlackoutBots.WedgeName);
 
-            // the Wedge, alone, on one open floor at raid start
+            // the Wedge leading 4-5 guards on one open floor at raid start, no waves
             spawns.Add(new BossLocationSpawn
             {
                 BossName = BlackoutBots.WedgeName,
                 BossChance = 100,
                 BossDifficulty = "normal",
-                BossEscortType = BlackoutBots.WedgeName,
-                BossEscortAmount = "0",
+                BossEscortType = BlackoutBots.GuardName,
+                BossEscortAmount = GuardEscorts,
                 BossEscortDifficulty = "normal",
                 BossZone = WedgeZone,
                 Time = -1,
@@ -548,7 +573,7 @@ namespace BlackoutServer
             try
             {
                 _controller.Inject();
-                _logger.Success("[Blackout] Wedge placed on Labs: solo, one open floor, raid start.");
+                _logger.Success("[Blackout] Wedge + 4-5 guards placed on Labs: one open floor, raid start, no waves.");
             }
             catch (Exception ex)
             {
