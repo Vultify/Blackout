@@ -12,7 +12,7 @@ using UnityEngine.Audio;
 
 namespace Blackout
 {
-    [BepInPlugin("com.vultify.blackout", "Blackout", "1.0.0")]
+    [BepInPlugin("com.vultify.blackout", "Blackout", "0.0.5")]
     public class BlackoutPlugin : BaseUnityPlugin
     {
         private const string LabsLocationId = "laboratory";

@@ -26,7 +26,7 @@ namespace BlackoutServer
         public override bool? IsBundleMod { get; init; } = true;
 
         public override SemanticVersioning.Version Version { get; init; }
-            = new SemanticVersioning.Version("1.0.0", false);
+            = new SemanticVersioning.Version("0.0.5", false);
 
         public override SemanticVersioning.Range SptVersion { get; init; }
             = new SemanticVersioning.Range("~4.0.13", false);

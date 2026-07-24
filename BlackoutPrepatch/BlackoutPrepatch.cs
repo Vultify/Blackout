@@ -9,7 +9,7 @@ namespace BlackoutPrepatch
     {
         public const string GUID = "com.vultify.blackout.prepatch";
         public const string Name = "Blackout Prepatch";
-        public const string Version = "1.0.0";
+        public const string Version = "0.0.5";
 
         // MoreBotsAPI's PREPATCHER guid (not its plugin guid) - this is what BepInEx orders us after
         public const string MoreBotsPrepatchGUID = "com.morebotsapiprepatch.tacticaltoaster";
