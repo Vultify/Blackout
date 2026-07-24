@@ -15,13 +15,13 @@ namespace BlackoutPrepatch
         public const string MoreBotsPrepatchGUID = "com.morebotsapiprepatch.tacticaltoaster";
     }
 
-    // Registers our own Black Division WildSpawnTypes into Assembly-CSharp before the client loads it.
-    // Both are ours, so they share one suitable group with no conflict - unlike depending on the
-    // separate BlackDiv mod, whose types already claim their own group.
+    // Registers the Wedge WildSpawnType into Assembly-CSharp before the client loads it. Only Wedge -
+    // the Black Division troops come from the separate BlackDiv mod, which registers its own
+    // 'blackDivAssault' type; registering it here too would collide on a duplicate key and crash the
+    // client's settings init.
     public static class WildSpawnTypePatch
     {
         public const int WedgeSpawnType = 868588;   // Vultify's block, cleared with TacticalToaster
-        public const int SoldierSpawnType = 868589;
 
         // SAIN "PMC brain" setup, matching how Black Division bots behave
         private const int PmcBaseBrain = 9;
@@ -36,18 +36,10 @@ namespace BlackoutPrepatch
         public static void Patch(ref AssemblyDefinition assembly)
         {
             // scavRole is the raid-end / kill-screen role label (needs a matching locale, added server-side).
-            // Wedge gets his own role so he reads "The Wedge"; soldiers read "Black Division".
-            // DifficultyModifier is SAIN's combat-skill dial. The Wedge fights boss-grade (.9); the guards
-            // and wave soldiers sit at raider grade (.75), a step above SAIN's default
+            // DifficultyModifier is SAIN's combat-skill dial; the Wedge fights boss-grade (.9).
             Register(assembly, WedgeSpawnType, "bossWedge", "Wedge", "The Wedge",
                 "Black Division's commander, holding Labs through the blackout.",
                 isBoss: true, isFollower: false, difficultyModifier: 0.9f);
-            Register(assembly, SoldierSpawnType, "blackDivAssault", "BlackDiv", "Black Division",
-                "A Black Division operative holding Labs.",
-                isBoss: true, isFollower: true, difficultyModifier: 0.75f);
-
-            // one group for all of ours - lets Wedge lead the soldiers as escorts
-            CustomWildSpawnTypeManager.AddSuitableGroup(new List<int> { WedgeSpawnType, SoldierSpawnType });
         }
 
         private static void Register(AssemblyDefinition assembly, int value, string name, string scavRole,

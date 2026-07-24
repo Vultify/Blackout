@@ -1,6 +1,6 @@
 {
   "type": "bossWedge",
-  "presetBatch": 4,
+  "presetBatch": 1,
   "isBoss": true,
   "mustHaveUniqueName": false,
   "durability": {
