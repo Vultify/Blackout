@@ -5,7 +5,7 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 ## [Unreleased]
 ### Changed
 - Wedge's gear, face, clothing and voice now come from WTT Content Backport instead of being shipped here. It backported the same live items in its 1.1.0, and two mods adding the same things meant duplicate items in the handbook and a pile of errors on every server start
-- **Content Backport 1.1.0 and CommonLib 2.0.22 are now the minimum versions.** Older ones leave Wedge with no gear at all
+- **Content Backport 1.1.0 and CommonLib 2.0.22 are now the minimum versions.** Older ones leave Wedge with no gear at all, so both halves of the mod now refuse to load against an older one instead of failing quietly
 ### Removed
 - Every asset bundle. The download drops from about 61 MB to around 1 MB, since Content Backport ships the same files
 ### Fixed

@@ -15,8 +15,10 @@ namespace Blackout
     [BepInPlugin("com.vultify.blackout", "Blackout", "1.1.0")]
     // the client half of WTT-CommonLib and WTT-ContentBackport must be present, or the Wedge's gear and
     // the Admin key resolve to nothing client-side. hard-depend so a missing half errors clearly
-    [BepInDependency("com.wtt.commonlib", BepInDependency.DependencyFlags.HardDependency)]
-    [BepInDependency("com.wtt.contentbackport", BepInDependency.DependencyFlags.HardDependency)]
+    // minimum versions, not just hard depends - Wedge's gear lives in Content Backport's bundles now, and an
+    // older client half loads fine while leaving every one of his items invisible
+    [BepInDependency("com.wtt.commonlib", "2.0.22")]
+    [BepInDependency("com.wtt.contentbackport", "1.1.0")]
     public class BlackoutPlugin : BaseUnityPlugin
     {
         private const string LabsLocationId = "laboratory";
