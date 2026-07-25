@@ -3,6 +3,11 @@
 All notable changes to Blackout are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-07-25
+### Added
+- The blackout is a per raid roll now instead of firing on every Labs run, so you never know which one goes dark until the lights cut. 25% by default, set `blackoutChance` in config.json to change it
+
 ### Changed
 - The LV-119's soft armor inserts are built in and can no longer be left out, the same as every other armor in the game
 
