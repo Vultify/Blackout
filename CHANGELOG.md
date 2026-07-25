@@ -8,6 +8,7 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 
 ### Fixed
 - The Wedge's armor and helmet now spawn with their soft armor inserts, not just the plates
+- The vehicles at the hangar and parking gates no longer disappear when the lights go out, taking their cover with them
 
 ## [1.0.0] - 2026-07-24
 First stable release. Same build the 0.0.5 and 0.0.6 test rounds validated, with no gameplay changes - the beta tags are superseded by this one.

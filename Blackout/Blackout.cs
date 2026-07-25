@@ -115,7 +115,11 @@ namespace Blackout
         private readonly HashSet<Light> _trackedLights = new HashSet<Light>();
         private readonly List<EFT.Interactive.LampController> _switchedLamps = new List<EFT.Interactive.LampController>();
         private readonly HashSet<EFT.Interactive.LampController> _trackedLamps = new HashSet<EFT.Interactive.LampController>();
-        private readonly List<GameObject> _disabledLightSceneRoots = new List<GameObject>();
+        private readonly List<GameObject> _disabledLightObjects = new List<GameObject>();
+        // the vehicles spared from the light-scene kill, and the parent chain that has to stay
+        // active for them to render - scratch sets, only meaningful during the sweep
+        private readonly HashSet<Transform> _lightSceneVehicles = new HashSet<Transform>();
+        private readonly HashSet<Transform> _lightSceneKeepPath = new HashSet<Transform>();
 
         private LightmapData[] _originalLightmaps;
         private float _originalAmbientIntensity;
@@ -615,7 +619,7 @@ namespace Blackout
                     _trackedLights.Clear();
                     _switchedLamps.Clear();
                     _trackedLamps.Clear();
-                    _disabledLightSceneRoots.Clear();
+                    _disabledLightObjects.Clear();
                     _stableSweeps = 0;
                     _stableLightScans = 0;
                     _reportedRelights.Clear();
@@ -943,9 +947,17 @@ namespace Blackout
             settings.ApplySettings();
         }
 
-        // the live event's dark preset simply doesn't load the map's *_LIGHT scene - it holds
-        // the physical fixtures (glowing tubes, screens) and their lights; disabling its roots
-        // is the runtime equivalent
+        // the live event's dark preset simply doesn't load the map's *_LIGHT scene, and switching
+        // its roots off is the runtime equivalent. The catch is that the scene isn't only lights:
+        // BSG parks the map's vehicles inside the per-area LAMPS groups, because headlights are
+        // light sources, so a blanket kill took the cars and their collision with it. Everything
+        // still goes off wholesale except the path down to those vehicles.
+        //
+        // Only the vehicles are spared, and they're found by structure, not by model name: every
+        // one carries a '*_Car_light_sourse' node and no lamp fixture does (Labs hangar: 33 of 48
+        // LAMPS children, Mercedes/Kamaz/Tacoma among them - a name list misses those). Testing
+        // for a Light component instead does not work here; the ceiling lamps, blue lights and TV
+        // panels are emissive meshes with no Light on them at all.
         private void DisableLightScene()
         {
             for (var i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
@@ -955,15 +967,62 @@ namespace Blackout
                 {
                     continue;
                 }
+
+                // one pass to mark what survives: each vehicle, and the chain of parents holding it
+                var vehicles = _lightSceneVehicles;
+                var keepPath = _lightSceneKeepPath;
+                vehicles.Clear();
+                keepPath.Clear();
                 foreach (var root in scene.GetRootGameObjects())
                 {
-                    if (root != null && root.activeSelf)
+                    foreach (var tr in root.GetComponentsInChildren<Transform>(true))
                     {
-                        root.SetActive(false);
-                        _disabledLightSceneRoots.Add(root);
+                        if (tr.name.IndexOf("Car_light_sourse", StringComparison.OrdinalIgnoreCase) < 0)
+                        {
+                            continue;
+                        }
+                        for (var node = tr; node != null; node = node.parent)
+                        {
+                            keepPath.Add(node);
+                            if (node.parent != null && node.parent.name == "LAMPS")
+                            {
+                                vehicles.Add(node);
+                            }
+                        }
                     }
                 }
-                Logger.LogInfo($"[Blackout] Light scene '{scene.name}' disabled ({_disabledLightSceneRoots.Count} roots)");
+
+                var before = _disabledLightObjects.Count;
+                foreach (var root in scene.GetRootGameObjects())
+                {
+                    SweepLightScene(root);
+                }
+                // no vehicles found (another map, or BSG renamed the node) means keepPath is empty
+                // and every root goes off - the old blanket behaviour, which is the safe direction
+                Logger.LogInfo($"[Blackout] Light scene '{scene.name}': {_disabledLightObjects.Count - before} objects off, {vehicles.Count} vehicles left standing");
+            }
+        }
+
+        private void SweepLightScene(GameObject go)
+        {
+            if (go == null || !go.activeSelf)
+            {
+                return;
+            }
+            var tr = go.transform;
+            if (_lightSceneVehicles.Contains(tr))
+            {
+                return;
+            }
+            if (!_lightSceneKeepPath.Contains(tr))
+            {
+                go.SetActive(false);
+                _disabledLightObjects.Add(go);
+                return;
+            }
+            for (var i = 0; i < tr.childCount; i++)
+            {
+                SweepLightScene(tr.GetChild(i).gameObject);
             }
         }
 
@@ -1260,14 +1319,14 @@ namespace Blackout
             _switchedLamps.Clear();
             _trackedLamps.Clear();
 
-            foreach (var root in _disabledLightSceneRoots)
+            foreach (var root in _disabledLightObjects)
             {
                 if (root != null)
                 {
                     root.SetActive(true);
                 }
             }
-            _disabledLightSceneRoots.Clear();
+            _disabledLightObjects.Clear();
 
             if (_originalLightmaps != null)
             {
