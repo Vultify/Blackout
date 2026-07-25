@@ -3,6 +3,9 @@
 All notable changes to Blackout are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+### Changed
+- The LV-119's soft armor inserts are built in and can no longer be left out, the same as every other armor in the game
+
 ### Fixed
 - The Wedge's armor and helmet now spawn with their soft armor inserts, not just the plates
 

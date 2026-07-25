@@ -620,7 +620,7 @@
               }
             ]
           },
-          "_required": false,
+          "_required": true,
           "_mergeSlotWithChildren": true,
           "_proto": "64479fdf9731c8fadc0642c1"
         },
@@ -644,7 +644,7 @@
               }
             ]
           },
-          "_required": false,
+          "_required": true,
           "_mergeSlotWithChildren": true,
           "_proto": "64479fdf9731c8fadc0642c1"
         }
