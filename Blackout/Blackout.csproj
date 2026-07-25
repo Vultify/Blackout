@@ -79,6 +79,11 @@
       <HintPath>$(SPT_PATH)\BepInEx\plugins\spt\spt-reflection.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- RequestHandler, for asking the server whether this raid rolled a blackout -->
+    <Reference Include="spt-common">
+      <HintPath>$(SPT_PATH)\BepInEx\plugins\spt\spt-common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Sirenix.Serialization">
       <HintPath>$(SPT_PATH)\EscapeFromTarkov_Data\Managed\Sirenix.Serialization.dll</HintPath>
       <Private>false</Private>

@@ -76,6 +76,14 @@ namespace Blackout
         private const string SubtitleText =
             "The facility has been switched to emergency power. Please remain where you are and await evacuation.";
 
+        // this raid's coin flip, fetched from the server once on entering Labs. the server owns the roll
+        // because the Wedge is baked into the location before we load in; reading it here keeps the
+        // darkness, lockdown, keypads and the locked arsenal door on the same flip as the boss.
+        // defaults to OFF on any failure - a wrongly-dark raid with no Wedge means no key for the
+        // arsenal door, which is worse than a plain raid
+        private bool _raidRolled;
+        private bool _eventThisRaid;
+
         private bool _inRaid;
         private bool _doorsLocked;
         private bool _exfilsDumped;
@@ -550,6 +558,28 @@ namespace Blackout
             }
         }
 
+        // one call per raid, on the frame we first see Labs. failures fall back to no event
+        private bool EventRollForThisRaid()
+        {
+            if (_raidRolled)
+            {
+                return _eventThisRaid;
+            }
+            _raidRolled = true;
+            try
+            {
+                var json = SPT.Common.Http.RequestHandler.GetJson("/blackout/state");
+                _eventThisRaid = json != null && json.Contains("\"blackout\":true");
+                Logger.LogInfo($"[Blackout] Raid roll: {(_eventThisRaid ? "BLACKOUT" : "normal Labs")}");
+            }
+            catch (Exception ex)
+            {
+                _eventThisRaid = false;
+                Logger.LogError($"[Blackout] Could not read raid state, running this raid as normal Labs: {ex.Message}");
+            }
+            return _eventThisRaid;
+        }
+
         private void Tick()
         {
             var gameWorld = Singleton<GameWorld>.Instance;
@@ -560,6 +590,9 @@ namespace Blackout
                     // raid ended; the scene (and everything we touched) is gone
                     CloseKeypad();
                     _inRaid = false;
+                    // next raid gets its own roll
+                    _raidRolled = false;
+                    _eventThisRaid = false;
                     _doorsLocked = false;
                     _exfilsDumped = false;
                     _lockdownApplied = false;
@@ -598,6 +631,13 @@ namespace Blackout
             }
 
             _inRaid = true;
+
+            // the whole event rides one server-side roll: no roll, no darkness, no lockdown, no keypad,
+            // no locked arsenal door, and no Wedge either - the raid is plain Labs
+            if (gameWorld.LocationId == LabsLocationId && !EventRollForThisRaid())
+            {
+                return;
+            }
 
             if (!_doorsLocked && _modEnabled.Value
                 && (!LabsOnly || gameWorld.LocationId == LabsLocationId))

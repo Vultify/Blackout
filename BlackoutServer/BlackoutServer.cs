@@ -509,13 +509,55 @@ namespace BlackoutServer
         private const string WedgeZone = "BotZoneFloor2";
         private const string GuardEscorts = "4,4,5,5"; // Wedge + 4-5 guards
 
-        private readonly DatabaseService _databaseService;
-        private readonly ISptLogger<BlackoutSpawnController> _logger;
+        private const double DefaultChance = 25;
 
-        public BlackoutSpawnController(DatabaseService databaseService, ISptLogger<BlackoutSpawnController> logger)
+        private readonly DatabaseService _databaseService;
+        private readonly RandomUtil _randomUtil;
+        private readonly ISptLogger<BlackoutSpawnController> _logger;
+        private readonly double _chance;
+
+        // the server owns the coin flip: the Wedge is a server-side spawn baked into the location
+        // before the client is even in the raid, so the roll has to live here. the client reads the
+        // result off /blackout/state so the darkness and the boss agree on the same flip
+        public bool CurrentRaidBlackout { get; private set; }
+
+        public BlackoutSpawnController(DatabaseService databaseService, RandomUtil randomUtil, ISptLogger<BlackoutSpawnController> logger)
         {
             _databaseService = databaseService;
+            _randomUtil = randomUtil;
             _logger = logger;
+            _chance = LoadChance();
+        }
+
+        // config.json sits next to our dll, copy-if-missing on install so a player's edit survives updates
+        private double LoadChance()
+        {
+            try
+            {
+                var dir = System.IO.Path.GetDirectoryName(typeof(BlackoutSpawnController).Assembly.Location);
+                var path = System.IO.Path.Combine(dir!, "config.json");
+                if (System.IO.File.Exists(path))
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(
+                        System.IO.File.ReadAllText(path),
+                        new System.Text.Json.JsonDocumentOptions
+                        {
+                            CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
+                            AllowTrailingCommas = true,
+                        });
+                    if (doc.RootElement.TryGetProperty("blackoutChance", out var v))
+                    {
+                        var chance = Math.Clamp(v.GetDouble(), 0, 100);
+                        _logger.Success($"[Blackout] blackout chance {chance}% per Labs raid (from config.json).");
+                        return chance;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning($"[Blackout] config.json unreadable, using {DefaultChance}%: {ex.Message}");
+            }
+            return DefaultChance;
         }
 
         public int Inject()
@@ -531,6 +573,16 @@ namespace BlackoutServer
             // identified by boss type - the base Labs map only spawns pmcBot as bosses, so removing the
             // Wedge is safe and makes re-injection idempotent
             spawns.RemoveAll(s => s.BossName == BlackoutBots.WedgeName);
+
+            // roll for this raid. a failed roll leaves Labs completely vanilla - no Wedge here, and the
+            // client reads the same result and skips the darkness, lockdown, keypads and the locked door
+            CurrentRaidBlackout = _randomUtil.GetChance100(_chance);
+            if (!CurrentRaidBlackout)
+            {
+                labs.Base.BossLocationSpawn = spawns;
+                _logger.Info($"[Blackout] Roll failed ({_chance}% chance) - this Labs raid stays normal.");
+                return 0;
+            }
 
             // the Wedge leading 4-5 guards on one open floor at raid start, no waves
             spawns.Add(new BossLocationSpawn
@@ -573,7 +625,7 @@ namespace BlackoutServer
             try
             {
                 _controller.Inject();
-                _logger.Success("[Blackout] Wedge + 4-5 guards placed on Labs: one open floor, raid start, no waves.");
+                _logger.Success("[Blackout] Labs spawns rolled: Wedge + 4-5 guards on a blackout raid, vanilla otherwise.");
             }
             catch (Exception ex)
             {
@@ -583,7 +635,7 @@ namespace BlackoutServer
         }
     }
 
-    // Spawn data is rebuilt per raid, so re-inject once the previous one ends.
+    // Spawn data is rebuilt per raid, so re-inject (and re-roll) once the previous one ends.
     [Injectable]
     public class BlackoutRaidEndRouter : StaticRouter
     {
@@ -605,6 +657,32 @@ namespace BlackoutServer
                         _controller.Inject();
                         return await new ValueTask<object>(output ?? string.Empty);
                     }, null),
+            };
+        }
+    }
+
+    // Tells the client whether THIS raid rolled a blackout, so the darkness, the extract lockdown, the
+    // keypads and the locked arsenal door all ride the same flip as the Wedge instead of rolling apart.
+    [Injectable]
+    public class BlackoutStateRouter : StaticRouter
+    {
+        private static BlackoutSpawnController _controller = null!;
+
+        public BlackoutStateRouter(JsonUtil jsonUtil, BlackoutSpawnController controller)
+            : base(jsonUtil, GetRoutes())
+        {
+            _controller = controller;
+        }
+
+        private static List<RouteAction> GetRoutes()
+        {
+            return new List<RouteAction>
+            {
+                new RouteAction("/blackout/state",
+                    async (url, info, sessionID, output) =>
+                        await new ValueTask<object>(
+                            _controller.CurrentRaidBlackout ? "{\"blackout\":true}" : "{\"blackout\":false}"),
+                    null),
             };
         }
     }
