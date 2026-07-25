@@ -22,11 +22,11 @@ namespace BlackoutServer
         public override string Author { get; init; } = "Vultify";
         public override string License { get; init; } = "MIT";
         public override string Url { get; init; } = "";
-        // ships AssetBundles for the Wedge gear - must be true or the client never requests them
+        // no bundles of our own any more - Wedge's gear is Content Backport's, and it serves them
         public override bool? IsBundleMod { get; init; } = false;
 
         public override SemanticVersioning.Version Version { get; init; }
-            = new SemanticVersioning.Version("1.1.0", false);
+            = new SemanticVersioning.Version("2.0.0", false);
 
         public override SemanticVersioning.Range SptVersion { get; init; }
             = new SemanticVersioning.Range("~4.0.13", false);
@@ -45,10 +45,10 @@ namespace BlackoutServer
         };
     }
 
-    // Every item the mod adds, created through WTT-CommonLib from db/CustomItems/ - the Wedge's gear
-    // (wedge_gear.json) and the event's Admin's key (blackout_key.json). Runs post-DB so the clone
-    // donors already exist. Deliberately one path for all items rather than mixing in SPT's own
-    // CustomItemService, so item definitions live in JSON and behave identically.
+    // The event's Admin's key (db/CustomItems/blackout_key.json), created through WTT-CommonLib. It's the
+    // only item the mod still adds - Wedge's gear all comes from Content Backport now, so the rest of this
+    // class is slot wiring CB doesn't do, plus assertions that its items actually turned up.
+    // Runs post-DB so the clone donor already exists.
     [Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 4)]
     public class BlackoutCustomItems : IOnLoad
     {
