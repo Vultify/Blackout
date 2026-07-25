@@ -42,7 +42,9 @@
       "mod_equipment_002": 100,
       "mod_mount": 100,
       "mod_nvg": 50,
-      "right_side_plate": 100
+      "right_side_plate": 100,
+      "soft_armor_back": 100,
+      "soft_armor_front": 100
     },
     "weaponMods": {
       "mod_bipod": 0,
