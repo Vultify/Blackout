@@ -23,7 +23,7 @@ namespace BlackoutServer
         public override string License { get; init; } = "MIT";
         public override string Url { get; init; } = "";
         // ships AssetBundles for the Wedge gear - must be true or the client never requests them
-        public override bool? IsBundleMod { get; init; } = true;
+        public override bool? IsBundleMod { get; init; } = false;
 
         public override SemanticVersioning.Version Version { get; init; }
             = new SemanticVersioning.Version("1.1.0", false);
@@ -35,9 +35,11 @@ namespace BlackoutServer
         public override List<string> Incompatibilities { get; init; } = new();
         public override Dictionary<string, SemanticVersioning.Range> ModDependencies { get; init; } = new()
         {
-            { "com.wtt.commonlib", new SemanticVersioning.Range(">=2.0.0") },
-            // Content Backport supplies the LV-119 inserts AND the Black Division clothing/voices
-            { "com.wtt.contentbackport", new SemanticVersioning.Range(">=1.0.0") },
+            // 2.0.22 is what Content Backport 1.1.0 itself requires - an older one loads but leaves CB broken
+            { "com.wtt.commonlib", new SemanticVersioning.Range(">=2.0.22") },
+            // 1.1.0 is a hard floor now: every piece of Wedge's gear, his face, clothing and voice are
+            // Content Backport items, and they don't exist before it
+            { "com.wtt.contentbackport", new SemanticVersioning.Range(">=1.1.0") },
             // the Wedge is our own MoreBotsAPI boss type
             { "com.morebotsapi.tacticaltoaster", new SemanticVersioning.Range(">=2.0.0") },
         };
@@ -58,7 +60,7 @@ namespace BlackoutServer
         private const string Mp7a2 = "5bd70322209c4d00d7167b8f";
         private const string ArsAdapter = "69985e9146e48aa39d06a685";
         private const string FxKposStock = "69985e7819f8713b630de3d6";
-        private const string Sf3pMuzzle = "69985ea146e48aa39d06a690";
+        private const string Sf3pMuzzle = "69985fa69f79621e1d0f58f5";
 
         // SureFire SOCOM556 suppressors that mount on an SF3P flash hider (same set the real AR15 SF3P takes)
         private static readonly string[] Socom556Suppressors =
@@ -72,28 +74,21 @@ namespace BlackoutServer
         // tactical filter - the MP7 must be told to accept it (matches Wedge's real preset).
         private const string AnPeq15Black = "68bedc0365e7dcf94f0cb0fc";
 
-        // the MultiCam helmet (needs its inserts pre-installed via preset) and the Wedge cover mod
-        private const string ExfilMulticamHelmet = "69985ea246e48aa39d06a691";
-        private const string WedgeCoverHelmet = "69985ea346e48aa39d06a692";
-        // the vanilla black Team Wendy EXFIL - SPT's copy of the model has no mod_equipment_002 node
+        // all Content Backport's, as of its 1.1.0. Wedge wears the VANILLA black EXFIL now: CB adds a
+        // mod_equipment_002 slot to it in code and puts its own cover in there, which is what our repacked
+        // helmet used to exist for.
+        private const string ExfilMulticamHelmet = "69c26722bf4ff19f50057643";
+        private const string WedgeCoverHelmet = "69e24f4f9e6ca1b32508bfbc";
         private const string BlackExfilHelmet = "5e00c1ad86f774747333222c";
-        // our black EXFIL, repacked from live 1.0.6.5 with a rewritten CAB. BSG's own mod_equipment_002
-        // cover socket is baked into that bundle, so the cover only renders on this one - it hosts the slot.
-        private const string WedgeBlackExfilHelmet = "69985ea646e48aa39d06a695";
         private const string CoyoteExfilHelmet = "5e01ef6886f77445f643baa4";
-        // helmet-mounted headset (clones the vanilla TW EXFIL ComTac VI), not a standalone earpiece
-        private const string ComTacVIBlack = "69985ea446e48aa39d06a693";
-        private const string ExfilTopPlate = "6551fec55d0cf82e51014288";  // helmet_top
-        private const string ExfilNapePlate = "655200ba0ef76cf7be09d528"; // helmet_back
+        // the helmet-mounted variant, not CB's standalone black ComTac VI
+        private const string ComTacVIBlack = "69c264c00f660b3f0d058fcf";
 
-        // Spiritus LV-119 (Icebreaker): clones the vanilla A18 rig (same donor Content Backport uses for its
-        // LV-119s) and ships its own 15-pouch layout prefab in db/CustomRigLayouts/.
-        private const string Lv119Rig = "69985ea546e48aa39d06a694";
-        private const string Lv119Layout = "wedge_lv119";
-        private const string Lv119LayoutBundle = "wedge_rig_layouts";
-        private const string SoftArmorFront = "68a5f30248f18317750ab20b";
-        private const string SoftArmorBack = "68a5f3a348f18317750ab4be";
-        private const string BallisticPlate = "656fa53d94b480b8a500c0e4";
+        // Spiritus LV-119: Content Backport 1.1.0 ships this rig itself, with the same 15 pouches, its own
+        // klin_rig layout and a preset that installs both soft armor inserts and both plates - so we use
+        // theirs rather than duplicating it. Ours used to live here and collided with their bundle.
+        private const string Lv119Rig = "69e2441a18cb3157560855ec";
+        private const string Lv119Layout = "klin_rig";
 
         private readonly WTTServerCommonLib.WTTServerCommonLib _commonLib;
         private readonly DatabaseService _databaseService;
@@ -115,19 +110,17 @@ namespace BlackoutServer
             {
                 await _commonLib.CustomItemServiceExtended.CreateCustomItems(Assembly.GetExecutingAssembly());
 
-                // serves db/CustomRigLayouts/*.bundle to the client, which registers each prefab under
-                // "UI/Rig Layouts/<root name>" - the name the item's RigLayoutName resolves against
-                _commonLib.CustomRigLayoutService.CreateRigLayouts(Assembly.GetExecutingAssembly());
-
                 var items = _databaseService.GetItems();
 
-                // MP7A1/A2 accept the ARS adapter in mod_stock; the adapter accepts only the FX-KPOS stock
+                // Content Backport's addtoModSlots should already put the adapter and the SF3P on the MP7,
+                // but do it anyway - it's idempotent, and depending on another mod's load order for whether
+                // Wedge has a stock and a suppressor is not worth the risk
                 AddToSlot(items, Mp7a1, "mod_stock", ArsAdapter);
                 AddToSlot(items, Mp7a2, "mod_stock", ArsAdapter);
-                SetSlotFilter(items, ArsAdapter, "mod_stock", FxKposStock);
-                // MP7A1/A2 accept the SF3P flash hider in mod_muzzle
                 AddToSlot(items, Mp7a1, "mod_muzzle", Sf3pMuzzle);
                 AddToSlot(items, Mp7a2, "mod_muzzle", Sf3pMuzzle);
+                // the adapter accepts only the FX-KPOS stock, which CB does not wire
+                SetSlotFilter(items, ArsAdapter, "mod_stock", FxKposStock);
                 // the SF3P's own mod_muzzle accepts the SOCOM556 suppressors, not the inherited MP7 Rotex.
                 // NOT _required - the gunsmith paints a required-but-empty slot red (no vanilla muzzle
                 // device requires its can); the Wedge's always-on suppressor is enforced per-role in
@@ -145,31 +138,18 @@ namespace BlackoutServer
                     AddToSlot(items, Mp7a2, slot, AnPeq15Black);
                 }
 
-                // ship the MultiCam helmet with its soft-armor inserts pre-installed via a default preset,
-                // so it isn't flagged incomplete (the top/nape slots are _required)
-                var presets = _databaseService.GetGlobals().ItemPresets;
-                AddArmorPreset(presets, "69985eb146e48aa39d06a6a1", "Team Wendy EXFIL MultiCam", ExfilMulticamHelmet,
-                    ("helmet_top", ExfilTopPlate), ("helmet_back", ExfilNapePlate));
-                AddArmorPreset(presets, "69985eb346e48aa39d06a6c1", "Spiritus LV-119 Icebreaker", Lv119Rig,
-                    ("Soft_armor_front", SoftArmorFront), ("Soft_armor_back", SoftArmorBack),
-                    ("Front_plate", BallisticPlate), ("Back_plate", BallisticPlate));
-                AddArmorPreset(presets, "69985eb246e48aa39d06a6b1", "Team Wendy EXFIL Black", WedgeBlackExfilHelmet,
-                    ("helmet_top", ExfilTopPlate), ("helmet_back", ExfilNapePlate));
+                // no armour presets and no cover slot here any more - Content Backport ships a preset for its
+                // MultiCam helmet, and adds the mod_equipment_002 cover slot to the vanilla black EXFIL itself
 
-                // the cover slot lives on OUR black EXFIL - only that bundle carries BSG's mod_equipment_002
-                // locator, and a mod only renders on a host whose model has a node named like the slot
-                AddModSlot(items, WedgeBlackExfilHelmet, "mod_equipment_002", WedgeCoverHelmet);
-
-                // the black ComTac VI is a helmet-mounted headset - the EXFIL helmets must accept it
-                // in the same slot that already takes the vanilla coyote TW EXFIL ComTac VI
-                foreach (var helmet in new[] { BlackExfilHelmet, CoyoteExfilHelmet, ExfilMulticamHelmet, WedgeBlackExfilHelmet })
+                // the black ComTac VI is a helmet-mounted headset and CB does NOT slot it anywhere
+                // (addtoModSlots false), so the EXFIL helmets still have to be told to accept it
+                foreach (var helmet in new[] { BlackExfilHelmet, CoyoteExfilHelmet, ExfilMulticamHelmet })
                 {
                     AddToSlot(items, helmet, "mod_equipment_000", ComTacVIBlack);
                 }
 
-                var made = new[] { AdminKey, ArsAdapter, FxKposStock, Sf3pMuzzle, ExfilMulticamHelmet,
-                    WedgeCoverHelmet, ComTacVIBlack, WedgeBlackExfilHelmet, Lv119Rig }
-                    .Count(id => items.ContainsKey(new MongoId(id)));
+                // the Admin's key is the only item Blackout still creates; everything else is CB's
+                var made = items.ContainsKey(new MongoId(AdminKey)) ? 1 : 0;
 
                 // single use; a wrong clone would silently inherit the donor's usage limit instead
                 items.TryGetValue(new MongoId(AdminKey), out var adminKey);
@@ -180,7 +160,9 @@ namespace BlackoutServer
                     .FirstOrDefault(i => i.Id == new MongoId(AdminKey))?.Price;
                 _databaseService.GetPrices().TryGetValue(new MongoId(AdminKey), out var keyFlea);
 
-                var coverSlot = SlotContains(items, WedgeBlackExfilHelmet, "mod_equipment_002", WedgeCoverHelmet);
+                // Content Backport's, not ours - assert it landed, because a silently missing cover slot is
+                // the difference between Wedge wearing his helmet cover and not
+                var coverSlot = SlotContains(items, BlackExfilHelmet, "mod_equipment_002", WedgeCoverHelmet);
                 var comtacMounted = SlotContains(items, BlackExfilHelmet, "mod_equipment_000", ComTacVIBlack);
                 // the two filter patches the gunsmith AND bot generation both depend on - assert the
                 // written state, a silent FindSlot miss here is exactly how a suppressor vanishes.
@@ -189,88 +171,38 @@ namespace BlackoutServer
                     && FindSlot(items, Sf3pMuzzle, "mod_muzzle")?.Required != true;
                 var peqOnMp7 = SlotContains(items, Mp7a1, "mod_tactical_000", AnPeq15Black);
 
-                // read the rig's real state back out of the database rather than trusting the JSON
+                // the rig is Content Backport's now - assert it actually turned up rather than assuming the
+                // dependency shipped what we expect, since Wedge's armour is unwearable without it
                 items.TryGetValue(new MongoId(Lv119Rig), out var rig);
                 var rigGrids = rig?.Properties?.Grids?.Count() ?? 0;
-                var rigCells = rig?.Properties?.Grids?
-                    .Sum(g => (g.Properties?.CellsH ?? 0) * (g.Properties?.CellsV ?? 0)) ?? 0;
                 var rigLayout = rig?.Properties?.RigLayoutName ?? "(none)";
-                var layoutRegistered = _commonLib.CustomRigLayoutService
-                    .GetLayoutManifest().Contains(Lv119LayoutBundle);
 
-                if (made == 9 && keyUses == 1 && keySellable == true && keyHandbook == 100000 && keyFlea == 157434
+                if (made == 1 && keyUses == 1 && keySellable == true && keyHandbook == 100000 && keyFlea == 157434
                     && SlotContains(items, Mp7a1, "mod_stock", ArsAdapter)
                     && SlotContains(items, Mp7a1, "mod_muzzle", Sf3pMuzzle) && coverSlot && comtacMounted
                     && socomOnSf3p && peqOnMp7
-                    && rigGrids == 15 && rigCells == 28 && rigLayout == Lv119Layout && layoutRegistered)
+                    && rigGrids == 15 && rigLayout == Lv119Layout)
                 {
-                    // everything above is asserted, not just counted - the detail only prints on failure
-                    _logger.Success($"[Blackout] Custom items created ({made}/9 via WTT-CommonLib).");
+                    // everything above is asserted, not just counted - the detail only prints on failure.
+                    // Most of it is Content Backport's gear now, so this doubles as a check that the
+                    // dependency still ships what Wedge's loadout expects
+                    _logger.Success("[Blackout] Admin's key created; Wedge's gear resolved from Content Backport.");
                 }
                 else
                 {
-                    _logger.Error($"[Blackout] Custom items incomplete - created {made}/9, key uses {keyUses} (want 1), " +
+                    _logger.Error($"[Blackout] Gear incomplete - admin key {made}/1, key uses {keyUses} (want 1), " +
+                        $"key sellable {keySellable}, handbook {keyHandbook} (want 100000), flea {keyFlea} (want 157434), " +
+                        $"adapter on MP7 {SlotContains(items, Mp7a1, "mod_stock", ArsAdapter)}, " +
+                        $"SF3P on MP7 {SlotContains(items, Mp7a1, "mod_muzzle", Sf3pMuzzle)}, " +
                         $"cover slot {coverSlot}, ComTac VI {comtacMounted}, " +
                         $"SOCOM on SF3P {socomOnSf3p}, black PEQ on MP7 {peqOnMp7}, " +
-                        $"LV-119 {rigGrids} pouches / {rigCells} cells, " +
-                        $"layout '{rigLayout}' registered={layoutRegistered}; check CustomItems load above.");
+                        $"CB LV-119 {rigGrids} pouches, layout '{rigLayout}'; check the CB version.");
                 }
             }
             catch (Exception ex)
             {
                 _logger.Error($"[Blackout] Wedge gear load failed: {ex}");
             }
-        }
-
-        // build a default preset (root item + its built-in armour in the named slots), mirroring how vanilla
-        // ships armour complete - without it the required slots sit empty and the item reads as incomplete
-        private static void AddArmorPreset(IDictionary<MongoId, Preset> presets, string presetId, string name,
-            string rootTpl, params (string Slot, string Tpl)[] children)
-        {
-            var pid = new MongoId(presetId);
-            if (presets.ContainsKey(pid)) return;
-
-            var rootId = new MongoId();
-            var items = new List<Item> { new() { Id = rootId, Template = new MongoId(rootTpl) } };
-            foreach (var (slot, tpl) in children)
-            {
-                items.Add(new Item { Id = new MongoId(), Template = new MongoId(tpl), ParentId = rootId, SlotId = slot });
-            }
-
-            presets[pid] = new Preset
-            {
-                Id = pid,
-                Type = "Preset",
-                Name = $"{name} Standard",
-                Parent = rootId,
-                Encyclopedia = new MongoId(rootTpl),
-                Items = items
-            };
-        }
-
-        // add a new mod slot to a host item (standard mod-slot proto), accepting one mod - idempotent
-        private static void AddModSlot(IDictionary<MongoId, TemplateItem> items, string hostId, string slotName, string modId)
-        {
-            if (!items.TryGetValue(new MongoId(hostId), out var host) || host.Properties?.Slots == null) return;
-            var slots = host.Properties.Slots.ToList();
-            if (slots.Any(s => s.Name == slotName)) return;
-            slots.Add(new Slot
-            {
-                Name = slotName,
-                Id = new MongoId(),
-                Parent = hostId,
-                Required = false,
-                MergeSlotWithChildren = false,
-                Prototype = "55d30c4c4bdc2db4468b457e",
-                Properties = new SlotProperties
-                {
-                    Filters = new List<SlotFilter>
-                    {
-                        new() { Shift = 0, Filter = new HashSet<MongoId> { new MongoId(modId) } }
-                    }
-                }
-            });
-            host.Properties.Slots = slots;
         }
 
         private static Slot? FindSlot(IDictionary<MongoId, TemplateItem> items, string hostId, string slotName)
@@ -399,11 +331,8 @@ namespace BlackoutServer
                 // "Black Div" instead of the raw ScavRole key
                 await _commonLib.CustomLocaleService.CreateCustomLocales(assembly, null);
 
-                // the Wedge's own head/top/pants/voice (his ripped-live bundles), so he looks and
-                // sounds like himself rather than a generic Black Division leader
-                await _commonLib.CustomHeadService.CreateCustomHeads(assembly, null);
-                await _commonLib.CustomClothingService.CreateCustomClothing(assembly, null);
-                await _commonLib.CustomVoiceService.CreateCustomVoices(assembly, null);
+                // his head/top/pants/voice come from Content Backport now - it ships the same ripped-live
+                // bundles, and two mods registering the same asset paths is what broke the load
 
                 _customBotTypeService.AddCustomWildSpawnTypeNames(new Dictionary<int, string>
                 {
@@ -465,11 +394,11 @@ namespace BlackoutServer
                 var wedgeOk = bots.TryGetValue(WedgeName.ToLowerInvariant(), out var wedge);
                 var guardOk = bots.ContainsKey(GuardName.ToLowerInvariant());
 
-                // the Wedge's own head/top/pants/voice must actually be in the customization DB, else
-                // he spawns with a broken/missing appearance and nothing logs it
+                // his head/top/pants/voice are Content Backport's - check they're actually in the
+                // customization DB, else he spawns with a broken appearance and nothing logs it
                 var cust = _databaseService.GetCustomization();
-                string[] wedgeAppearance = { "69985f0146e48aa39d06a701", "69985f0246e48aa39d06a702",
-                    "69985f0346e48aa39d06a703", "69985f0446e48aa39d06a704" };
+                string[] wedgeAppearance = { "69e24393d10363e6f90064d0", "69e2427109707df7660efa26",
+                    "69e24294e0d3dc5cfd031434", "69c68f1a8f75eda7610edac4" };
                 var appearanceOk = wedgeAppearance.Count(id => cust.ContainsKey(new MongoId(id)));
                 var wedgeHp = wedgeOk
                     ? (int)(wedge!.BotHealth?.BodyParts?.FirstOrDefault() is { } bp

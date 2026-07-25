@@ -12,7 +12,7 @@ Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the gene
 
 ## The Wedge and Black Division
 
-- The Wedge holds Labs every raid with 4-5 Black Division Guards - no waves, one boss and his escort, our own bot types rather than a dependency on anyone else's
+- The Wedge holds Labs on a blackout raid with 4-5 Black Division Guards - no waves, one boss and his escort, our own bot types rather than a dependency on anyone else's
 - He and his guards are set friendly toward WTT's separate Black Division mod, so you can run both and let their spawns fill the raid out around him
 - His real live loadout: the MP7A1 "Wedge" preset with the suppressor always on, his own face, clothing and voicelines from the live files, the M53A1 gas mask, EXFIL helmet and LV-119 Icebreaker
 - SAIN runs their combat when installed (the Wedge under the Bosses tab at boss grade, his guards under their own "Black Division" tab at raider grade); without SAIN they fall back to PMC brains
@@ -21,8 +21,9 @@ Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the gene
 ## Requirements
 
 - SPT 4.0.x
-- WTT-CommonLib - both halves (WTT-ServerCommonLib and WTT-ClientCommonLib)
-- WTT-ContentBackport - both halves (server and client)
+- WTT-CommonLib **2.0.22 or newer** - both halves (WTT-ServerCommonLib and WTT-ClientCommonLib)
+- WTT-ContentBackport **1.1.0 or newer** - both halves (server and client). Wedge's gear, face, clothing and
+  voice are all Content Backport items, so an older version leaves him with nothing
 - MoreBotsAPI - both halves (server and prepatcher)
 - SAIN recommended, not required
 - WTT's Black Division mod optional - the Wedge and his guards are friendly toward it
