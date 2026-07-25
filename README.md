@@ -1,7 +1,5 @@
 # Blackout
 
-> **In development - not released.**
-
 Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the generators die, the lights go out, and you run the facility on emergency power - while the Wedge and his Black Division hold the floors.
 
 ## The blackout
@@ -14,17 +12,20 @@ Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the gene
 
 ## The Wedge and Black Division
 
-- The Wedge spawns every raid with 4-5 guards, a second squad holds the other floor, and Black Division waves sweep in every couple minutes
+- The Wedge holds Labs every raid with 4-5 Black Division Guards - no waves, one boss and his escort, our own bot types rather than a dependency on anyone else's
+- He and his guards are set friendly toward WTT's separate Black Division mod, so you can run both and let their spawns fill the raid out around him
 - His real live loadout: the MP7A1 "Wedge" preset with the suppressor always on, his own face, clothing and voicelines from the live files, the M53A1 gas mask, EXFIL helmet and LV-119 Icebreaker
-- SAIN runs their combat when installed (own "Black Division" section in the SAIN menu, soldiers at raider grade, the Wedge at boss grade); without SAIN they fall back to PMC brains
-- The Wedge always carries the **TerraGroup Labs arsenal storage room key** - single use, opens the arsenal, and the door can't be breached. Killing him is the way in. His soldiers have a slim chance to carry one too
+- SAIN runs their combat when installed (the Wedge under the Bosses tab at boss grade, his guards under their own "Black Division" tab at raider grade); without SAIN they fall back to PMC brains
+- The Wedge always carries the **TerraGroup Labs arsenal storage room key** - single use, opens the arsenal, and the door can't be breached. Killing him is the way in
 
 ## Requirements
 
 - SPT 4.0.x
-- [WTT-ServerCommonLib](https://forge.sp-tarkov.com/) and WTT-ContentBackport
-- MoreBotsAPI
+- WTT-CommonLib - both halves (WTT-ServerCommonLib and WTT-ClientCommonLib)
+- WTT-ContentBackport - both halves (server and client)
+- MoreBotsAPI - both halves (server and prepatcher)
 - SAIN recommended, not required
+- WTT's Black Division mod optional - the Wedge and his guards are friendly toward it
 
 ## Structure
 

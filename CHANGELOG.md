@@ -4,6 +4,11 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-24
+First stable release. Same build the 0.0.5 and 0.0.6 test rounds validated, with no gameplay changes - the beta tags are superseded by this one.
+### Changed
+- README now matches what the mod actually does: the Wedge holds Labs with 4-5 guards and no waves, and the requirements list names both halves of every dependency
+
 ## [0.0.6] - 2026-07-23
 ### Changed
 - F12 menu is now a single Enable Mod toggle; every other setting is fixed at the value tuned against the live event
