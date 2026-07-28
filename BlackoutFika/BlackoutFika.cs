@@ -18,7 +18,7 @@ namespace BlackoutFika
     // Three things travel: the moment the lights cut, the admin switch being pulled, and a keycard
     // door being opened with the code. The raid code itself needs nothing here - the server rolls it
     // and every client already reads the same digits off /blackout/state.
-    [BepInPlugin("com.vultify.blackout.fika", "Blackout Fika", "2.1.0")]
+    [BepInPlugin("com.vultify.blackout.fika", "Blackout Fika", "1.0.0")]
     // 2.1.0 is where BlackoutSync appeared - against an older Blackout.dll every hook in here is a
     // missing type, so require the floor and let BepInEx skip us cleanly instead
     [BepInDependency("com.vultify.blackout", "2.1.0")]
