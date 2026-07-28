@@ -26,7 +26,7 @@ namespace BlackoutServer
         public override bool? IsBundleMod { get; init; } = false;
 
         public override SemanticVersioning.Version Version { get; init; }
-            = new SemanticVersioning.Version("2.0.0", false);
+            = new SemanticVersioning.Version("2.1.0", false);
 
         public override SemanticVersioning.Range SptVersion { get; init; }
             = new SemanticVersioning.Range("~4.0.13", false);
@@ -450,6 +450,11 @@ namespace BlackoutServer
         // result off /blackout/state so the darkness and the boss agree on the same flip
         public bool CurrentRaidBlackout { get; private set; }
 
+        // and the emergency code with it. the client used to roll its own, which is fine for one player
+        // and useless for several - in a co-op raid every player got a different number on the same
+        // whiteboard, and each keypad only accepted the code that client happened to generate
+        public string CurrentRaidCode { get; private set; } = "0000";
+
         public BlackoutSpawnController(DatabaseService databaseService, RandomUtil randomUtil, ISptLogger<BlackoutSpawnController> logger)
         {
             _databaseService = databaseService;
@@ -506,6 +511,8 @@ namespace BlackoutServer
             // roll for this raid. a failed roll leaves Labs completely vanilla - no Wedge here, and the
             // client reads the same result and skips the darkness, lockdown, keypads and the locked door
             CurrentRaidBlackout = _randomUtil.GetChance100(_chance);
+            // one code per raid, rolled here so every client in it reads the same four digits
+            CurrentRaidCode = _randomUtil.GetInt(0, 9999).ToString("D4");
             if (!CurrentRaidBlackout)
             {
                 labs.Base.BossLocationSpawn = spawns;
@@ -610,7 +617,8 @@ namespace BlackoutServer
                 new RouteAction("/blackout/state",
                     async (url, info, sessionID, output) =>
                         await new ValueTask<object>(
-                            _controller.CurrentRaidBlackout ? "{\"blackout\":true}" : "{\"blackout\":false}"),
+                            "{\"blackout\":" + (_controller.CurrentRaidBlackout ? "true" : "false")
+                            + ",\"code\":\"" + _controller.CurrentRaidCode + "\"}"),
                     null),
             };
         }

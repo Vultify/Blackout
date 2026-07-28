@@ -12,7 +12,7 @@ using UnityEngine.Audio;
 
 namespace Blackout
 {
-    [BepInPlugin("com.vultify.blackout", "Blackout", "2.0.0")]
+    [BepInPlugin("com.vultify.blackout", "Blackout", "2.1.0")]
     // the client half of WTT-CommonLib and WTT-ContentBackport must be present, or the Wedge's gear and
     // the Admin key resolve to nothing client-side. hard-depend so a missing half errors clearly
     // minimum versions, not just hard depends - Wedge's gear lives in Content Backport's bundles now, and an
@@ -159,6 +159,10 @@ namespace Blackout
         private bool _whiteboardSpawned;
         private GameObject _whiteboard;
         private string _raidCode;
+        // what the server rolled for this raid, read once with the blackout state
+        private string _serverCode;
+        // set while applying a cut that came from another player, so we don't send it back
+        private bool _applyingRemote;
 
         internal static BlackoutPlugin Instance;
         private EFT.Interactive.KeycardDoor _keypadDoor;
@@ -187,6 +191,43 @@ namespace Blackout
                 "Enable Mod",
                 true,
                 "Master toggle - enables or disables the entire mod");
+
+            // what to do when the bridge tells us someone else did something. Left unset when Fika
+            // isn't installed, in which case none of this is ever reached
+            BlackoutSync.ApplyCut = () =>
+            {
+                if (_blackoutActive || !_eventThisRaid)
+                {
+                    return;
+                }
+                _clockStarted = true;
+                _blackoutAt = Time.time;
+                _applyingRemote = true;
+                try { ActivateBlackout(); }
+                finally { _applyingRemote = false; }
+            };
+            BlackoutSync.ApplySwitch = () =>
+            {
+                if (_gatesActivated || !_eventThisRaid)
+                {
+                    return;
+                }
+                _gatesActivated = true;
+                ActivateGates();
+            };
+            BlackoutSync.ApplyDoorUnlock = hash =>
+            {
+                foreach (var door in FindObjectsOfType<EFT.Interactive.KeycardDoor>())
+                {
+                    if (door != null && BlackoutSync.HashId(door.Id) == hash
+                        && door.DoorState == EFT.Interactive.EDoorState.Locked)
+                    {
+                        door.Unlock();
+                        Logger.LogInfo($"[Blackout] '{door.Id}' unlocked by another player");
+                        return;
+                    }
+                }
+            };
 
             LoadSoundBundle();
 
@@ -286,6 +327,7 @@ namespace Blackout
                 // no beep of our own - UnlockCoroutine's success path already plays it
                 _keypadDoor.Unlock();
                 Logger.LogInfo($"[Blackout] correct code entered, '{_keypadDoor.Id}' unlocked");
+                BlackoutSync.DoorUnlocked?.Invoke(_keypadDoor.Id);
             }
             else
             {
@@ -576,7 +618,8 @@ namespace Blackout
             {
                 var json = SPT.Common.Http.RequestHandler.GetJson("/blackout/state");
                 _eventThisRaid = json != null && json.Contains("\"blackout\":true");
-                Logger.LogInfo($"[Blackout] Raid roll: {(_eventThisRaid ? "BLACKOUT" : "normal Labs")}");
+                _serverCode = ReadCode(json);
+                Logger.LogInfo($"[Blackout] Raid roll: {(_eventThisRaid ? "BLACKOUT" : "normal Labs")}, code {_serverCode ?? "(none, falling back to a local roll)"}");
             }
             catch (Exception ex)
             {
@@ -584,6 +627,37 @@ namespace Blackout
                 Logger.LogError($"[Blackout] Could not read raid state, running this raid as normal Labs: {ex.Message}");
             }
             return _eventThisRaid;
+        }
+
+        // "code":"0492" out of the state payload, without dragging a json parser into the plugin.
+        // null means an older server that doesn't send one, and the caller rolls its own
+        private static string ReadCode(string json)
+        {
+            if (json == null)
+            {
+                return null;
+            }
+            const string key = "\"code\":\"";
+            var start = json.IndexOf(key, StringComparison.Ordinal);
+            if (start < 0)
+            {
+                return null;
+            }
+            start += key.Length;
+            var end = json.IndexOf('"', start);
+            if (end < 0 || end - start != 4)
+            {
+                return null;
+            }
+            var code = json.Substring(start, 4);
+            foreach (var c in code)
+            {
+                if (c < '0' || c > '9')
+                {
+                    return null;
+                }
+            }
+            return code;
         }
 
         private void Tick()
@@ -607,6 +681,7 @@ namespace Blackout
                     _whiteboardSpawned = false;
                     _whiteboard = null;
                     _raidCode = null;
+                    _serverCode = null;
                     if (_boardRt != null)
                     {
                         _boardRt.Release();
@@ -730,6 +805,13 @@ namespace Blackout
             // real control is only proven by the player moving or looking around
             if (!_clockStarted)
             {
+                // in a co-op raid the host owns this moment. Everyone else sits here doing nothing
+                // until the cut packet lands, otherwise each player goes dark whenever they happened
+                // to move, which is the single most obvious desync in the whole event
+                if (BlackoutSync.Active && !BlackoutSync.IsHost)
+                {
+                    return;
+                }
                 var game = Singleton<AbstractGame>.Instance;
                 if (game == null || game.Status != GameStatus.Started)
                 {
@@ -777,6 +859,12 @@ namespace Blackout
 
         private void ActivateBlackout()
         {
+            // the host reached its own cut moment - tell everyone else so the lights die together.
+            // not when we're the one applying someone else's cut, or it echoes straight back out
+            if (!_applyingRemote)
+            {
+                BlackoutSync.CutHappened?.Invoke();
+            }
             _blackoutActive = true;
             _announcementPlayed = false;
             _announcementAt = Time.time + AnnouncementDelay;
@@ -1766,10 +1854,11 @@ namespace Blackout
         }
 
         // the raid's emergency code lives on the admin room whiteboard, at the live event's own
-        // board pose - rolled fresh every raid; step 2 wires the keypad doors to check against it
+        // board pose. The server rolls it with the raid so every player reads the same four digits;
+        // the local roll is only a fallback for a client running ahead of its server
         private bool SpawnWhiteboard()
         {
-            _raidCode = UnityEngine.Random.Range(0, 10000).ToString("D4");
+            _raidCode = _serverCode ?? UnityEngine.Random.Range(0, 10000).ToString("D4");
 
             var donor = GameObject.Find(WhiteboardDonorName);
             if (donor == null)
@@ -1978,6 +2067,9 @@ namespace Blackout
             }
             _gatesActivated = true;
             ActivateGates();
+            // whoever pulled it tells the rest of the raid - each client has its own cloned switch
+            // prop, so without this the gates only open for the player who touched it
+            BlackoutSync.SwitchFlipped?.Invoke();
         }
 
         private bool BlockGateRamps()
@@ -2080,6 +2172,58 @@ namespace Blackout
             _powerDownClip = bundle.LoadAsset<AudioClip>("black_out_huge");
             _announcerClip = bundle.LoadAsset<AudioClip>("announcer_lights_out_01");
             Logger.LogInfo($"[Blackout] Bundle loaded: blackout sfx {(_powerDownClip != null ? "ok" : "MISSING")}, announcer {(_announcerClip != null ? "ok" : "MISSING")}");
+        }
+    }
+
+    // The seam the optional BlackoutFika plugin binds to. Nothing in here does anything on its own,
+    // so a single player install behaves exactly as it did before: Active stays false, every hook
+    // stays null, and the mod keeps deciding everything locally.
+    //
+    // Three things have to agree across a co-op raid: when the lights cut, whether the gates are
+    // open, and which doors have been unlocked. The raid code is already handled - the server rolls
+    // it and hands the same digits to everyone.
+    public static class BlackoutSync
+    {
+        // true only while a Fika raid is running with the bridge loaded
+        public static bool Active;
+        // the host owns the moment the lights go out; everyone else waits to be told
+        public static bool IsHost = true;
+
+        // us -> bridge: something happened here that the rest of the raid needs
+        public static Action CutHappened;
+        public static Action SwitchFlipped;
+        public static Action<string> DoorUnlocked;
+
+        // bridge -> us: someone else did it, apply it locally. Assigned by the plugin on Awake.
+        // doors arrive as a hash rather than a name - see HashId
+        public static Action ApplyCut;
+        public static Action ApplySwitch;
+        public static Action<int> ApplyDoorUnlock;
+
+        // FNV-1a over the door id. Both sides hash the same way, so the wire only carries an int:
+        // string.GetHashCode is not stable between processes, and serializing a string across
+        // LiteNetLib drags in a ReadOnlySpan overload that net472 has no type for
+        public static int HashId(string id)
+        {
+            unchecked
+            {
+                var hash = (int)2166136261;
+                if (id == null)
+                {
+                    return hash;
+                }
+                foreach (var c in id)
+                {
+                    hash = (hash ^ c) * 16777619;
+                }
+                return hash;
+            }
+        }
+
+        public static void LeaveRaid()
+        {
+            Active = false;
+            IsHost = true;
         }
     }
 }

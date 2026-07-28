@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>BlackoutFika</AssemblyName>
+    <RootNamespace>BlackoutFika</RootNamespace>
+    <Version>2.1.0</Version>
+    <LangVersion>latest</LangVersion>
+    <!-- where to find the client's own build. build.bat overrides it, because it builds the client
+         with -o bin\Release and the DLL lands flat instead of under the TFM folder. This default is
+         what a plain dotnet build produces -->
+    <BlackoutDll Condition="'$(BlackoutDll)' == ''">$(MSBuildThisFileDirectory)..\Blackout\bin\Release\net472\Blackout.dll</BlackoutDll>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- the sibling project's own output, for the BlackoutSync seam. NOT the deployed copy in the
+         install, which is whatever was last installed and lags behind the source -->
+    <Reference Include="Blackout">
+      <HintPath>$(BlackoutDll)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- netstandard2.1, not net472 like the other projects: Fika.Core is built against netstandard
+         2.1 and net472 resolves 2.0, and NetDataWriter's ReadOnlySpan overloads need a real Span
+         definition that the game's System.Memory.dll (a facade) doesn't carry. Both go away here.
+         LiteNetLib is merged into Fika.Core, so this one reference covers the packet types too -->
+    <Reference Include="Fika.Core">
+      <HintPath>$(SPT_PATH)\BepInEx\plugins\Fika\Fika.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx">
+      <HintPath>$(SPT_PATH)\BepInEx\core\BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- FikaServer implements an Assembly-CSharp interface, so naming the type needs this -->
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(SPT_PATH)\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Comfort">
+      <HintPath>$(SPT_PATH)\EscapeFromTarkov_Data\Managed\Comfort.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(SPT_PATH)\EscapeFromTarkov_Data\Managed\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(SPT_PATH)\EscapeFromTarkov_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

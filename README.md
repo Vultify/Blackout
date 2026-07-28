@@ -18,6 +18,12 @@ Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the gene
 - SAIN runs their combat when installed (the Wedge under the Bosses tab at boss grade, his guards under their own "Black Division" tab at raider grade); without SAIN they fall back to PMC brains
 - The Wedge always carries the **TerraGroup Labs arsenal storage room key** - single use, opens the arsenal, and the door can't be breached. Killing him is the way in
 
+## Co-op
+
+Fika raids stay in step. The server rolls one emergency code for the raid so everyone reads the same digits off the whiteboard, and the three things that can otherwise drift apart all travel between players - the lights cut for the whole group at once, whoever pulls the admin switch opens the gates for everyone, and a keycard door one player opens with the code is open for the rest.
+
+`BlackoutFika.dll` handles it and only loads when Fika is installed. Nothing to configure, and a solo install behaves exactly as it always has.
+
 ## Requirements
 
 - SPT 4.0.x
@@ -27,12 +33,14 @@ Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the gene
 - MoreBotsAPI - both halves (server and prepatcher)
 - SAIN recommended, not required
 - WTT's Black Division mod optional - the Wedge and his guards are friendly toward it
+- Fika optional - install it and co-op raids sync themselves, see [Co-op](#co-op)
 
 ## Structure
 
 - `BlackoutPrepatch/` - prepatcher, registers the Wedge and Black Division spawn types
 - `Blackout/` - client BepInEx plugin (darkness, sounds, door locks, keypad)
 - `BlackoutServer/` - server mod (items, bots, spawns, the arsenal key)
+- `BlackoutFika/` - optional co-op bridge, only loads on an install that has Fika
 - `blackout_sounds.bundle` - the live event's audio, extracted and repacked
 
 See [CHANGELOG.md](CHANGELOG.md) for the full build log.
