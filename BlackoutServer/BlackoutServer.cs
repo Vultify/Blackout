@@ -183,10 +183,9 @@ namespace BlackoutServer
                     && socomOnSf3p && peqOnMp7
                     && rigGrids == 15 && rigLayout == Lv119Layout)
                 {
-                    // everything above is asserted, not just counted - the detail only prints on failure.
-                    // Most of it is Content Backport's gear now, so this doubles as a check that the
-                    // dependency still ships what Wedge's loadout expects
-                    _logger.Success("[Blackout] Admin's key created; Wedge's gear resolved from Content Backport.");
+                    // everything above is asserted, not just counted, and a pass says nothing - the detail
+                    // only prints on failure. Most of it is Content Backport's gear now, so this doubles as
+                    // a check that the dependency still ships what Wedge's loadout expects
                 }
                 else
                 {
@@ -261,7 +260,6 @@ namespace BlackoutServer
                 faction.BotTypes.Add((WildSpawnType)BlackoutBots.WedgeSpawnType);
                 faction.BotTypes.Add((WildSpawnType)BlackoutBots.GuardSpawnType);
                 _factionService.Factions[FactionName] = faction;
-                _logger.Success($"[Blackout] Faction '{FactionName}' registered ({faction.BotTypes.Count} types).");
             }
             catch (Exception ex)
             {
@@ -400,20 +398,8 @@ namespace BlackoutServer
                 string[] wedgeAppearance = { "69e24393d10363e6f90064d0", "69e2427109707df7660efa26",
                     "69e24294e0d3dc5cfd031434", "69c68f1a8f75eda7610edac4" };
                 var appearanceOk = wedgeAppearance.Count(id => cust.ContainsKey(new MongoId(id)));
-                var wedgeHp = wedgeOk
-                    ? (int)(wedge!.BotHealth?.BodyParts?.FirstOrDefault() is { } bp
-                        ? bp.Chest.Max + bp.Head.Max + bp.LeftArm.Max + bp.LeftLeg.Max
-                          + bp.RightArm.Max + bp.RightLeg.Max + bp.Stomach.Max
-                        : 0)
-                    : 0;
-
-                if (wedgeOk && guardOk && appearanceOk == 4)
-                {
-                    _logger.Success($"[Blackout] Wedge ('{WedgeName}', {wedgeHp} HP, own appearance) + guards " +
-                        $"('{GuardName}'); Armory loadout: {(hasArmory ? "on" : "off (base weapons)")}; " +
-                        $"hostile to {EnemyFactions.Length} factions, friendly to Black Division.");
-                }
-                else
+                // a clean load says nothing - only a broken one is worth a line
+                if (!wedgeOk || !guardOk || appearanceOk != 4)
                 {
                     _logger.Error($"[Blackout] Bot load incomplete - Wedge={wedgeOk}, guard={guardOk}, " +
                         $"Wedge appearance {appearanceOk}/4 in customization DB; " +
@@ -516,7 +502,7 @@ namespace BlackoutServer
             if (!CurrentRaidBlackout)
             {
                 labs.Base.BossLocationSpawn = spawns;
-                _logger.Info($"[Blackout] Roll failed ({_chance}% chance) - this Labs raid stays normal.");
+                _logger.Info("[Blackout] Roll: normal Labs - no Wedge, no darkness this raid.");
                 return 0;
             }
 
@@ -540,6 +526,8 @@ namespace BlackoutServer
             });
 
             labs.Base.BossLocationSpawn = spawns;
+            // no raid code here on purpose - the whiteboard is where you're meant to find it
+            _logger.Success("[Blackout] Roll: BLACKOUT - Wedge and 4-5 guards hold Labs this raid.");
             return 1;
         }
     }
@@ -561,7 +549,6 @@ namespace BlackoutServer
             try
             {
                 _controller.Inject();
-                _logger.Success("[Blackout] Labs spawns rolled: Wedge + 4-5 guards on a blackout raid, vanilla otherwise.");
             }
             catch (Exception ex)
             {
