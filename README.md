@@ -22,7 +22,7 @@ Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the gene
 
 Fika raids stay in step. The server rolls one emergency code for the raid so everyone reads the same digits off the whiteboard, and the three things that can otherwise drift apart all travel between players - the lights cut for the whole group at once, whoever pulls the admin switch opens the gates for everyone, and a keycard door one player opens with the code is open for the rest.
 
-`BlackoutFika.dll` handles it and only loads when Fika is installed. Nothing to configure, and a solo install behaves exactly as it always has.
+This lives in a **separate Blackout Fika addon** on the Forge rather than in the main download, so a solo install never has the file at all. Grab it only if you run Fika - it needs Blackout 2.1.0 or newer, there is nothing to configure, and playing alone is unchanged either way.
 
 ## Requirements
 
@@ -33,14 +33,14 @@ Fika raids stay in step. The server rolls one emergency code for the raid so eve
 - MoreBotsAPI - both halves (server and prepatcher)
 - SAIN recommended, not required
 - WTT's Black Division mod optional - the Wedge and his guards are friendly toward it
-- Fika optional - install it and co-op raids sync themselves, see [Co-op](#co-op)
+- Fika optional - with it plus the Blackout Fika addon, co-op raids sync themselves, see [Co-op](#co-op)
 
 ## Structure
 
 - `BlackoutPrepatch/` - prepatcher, registers the Wedge and Black Division spawn types
 - `Blackout/` - client BepInEx plugin (darkness, sounds, door locks, keypad)
 - `BlackoutServer/` - server mod (items, bots, spawns, the arsenal key)
-- `BlackoutFika/` - optional co-op bridge, only loads on an install that has Fika
+- `BlackoutFika/` - the co-op bridge, published as its own Forge addon rather than shipped here
 - `blackout_sounds.bundle` - the live event's audio, extracted and repacked
 
 See [CHANGELOG.md](CHANGELOG.md) for the full build log.

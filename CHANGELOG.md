@@ -7,7 +7,7 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 ## [2.1.0] - 2026-07-27
 ### Added
 - **Fika co-op support.** A blackout raid now runs the same for everyone in it: the lights cut for the whole group at once, the admin office switch opens the gates for every player and not just the one who pulled it, and a keycard door someone else opens with the code is open for you too
-- `BlackoutFika.dll`, the optional bridge that does it. It only loads when Fika is installed, so a solo install behaves exactly as it did before and there is nothing to configure either way
+- The bridge that does it ships as a **separate Blackout Fika addon**, not in this download, so a solo install never carries a file it cannot use. It needs Blackout 2.1.0 or newer and there is nothing to configure either way
 ### Changed
 - The emergency code is rolled by the server instead of by each client, so every player in a raid reads the same four digits off the same whiteboard. Before this everyone rolled their own, which is invisible alone and useless in a group - each keypad only took the code that player happened to generate
 
