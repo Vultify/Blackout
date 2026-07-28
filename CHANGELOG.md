@@ -81,3 +81,14 @@ First stable release. Same build the 0.0.5 and 0.0.6 test rounds validated, with
 - The dark ambience loop is gone; the power-cut boom and the intercom announcement stay
 ### Fixed
 - Magenta EXFIL helmets: every shipped bundle now declares its real dependencies, generated from the bundles themselves instead of written by hand
+
+---
+
+# Blackout Fika (addon)
+
+The co-op bridge is a separate download with its own version line, so it only moves when the bridge itself changes. It always requires the Blackout version named below or newer.
+
+## [1.0.0] - 2026-07-27
+### Added
+- First release. Keeps a Fika raid's blackout in step across every player: the host's power cut takes the whole group dark at once, whoever pulls the admin office switch opens the gates for everyone, and a keycard door one player opens with the emergency code is open for the rest
+- Requires Blackout 2.1.0 or newer. Against anything older it is skipped at load instead of half working, since the hooks it binds to did not exist yet
