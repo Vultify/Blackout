@@ -18,6 +18,16 @@ Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the gene
 - SAIN runs their combat when installed (the Wedge under the Bosses tab at boss grade, his guards under their own "Black Division" tab at raider grade); without SAIN they fall back to PMC brains
 - The Wedge always carries the **TerraGroup Labs arsenal storage room key** - single use, opens the arsenal, and the door can't be breached. Killing him is the way in
 
+## Config
+
+One setting, in `SPT/user/mods/Blackout/config.json`:
+
+```json
+{ "blackoutChance": 25 }
+```
+
+The percent chance any given Labs raid goes dark. Set it to 100 to get the event every time, or 0 to switch the mod off entirely without uninstalling it. There is no F12 menu - everything else is fixed at the values tuned against the live event.
+
 ## Co-op
 
 Fika raids stay in step. The server rolls one emergency code for the raid so everyone reads the same digits off the whiteboard, and the three things that can otherwise drift apart all travel between players - the lights cut for the whole group at once, whoever pulls the admin switch opens the gates for everyone, and a keycard door one player opens with the code is open for the rest.

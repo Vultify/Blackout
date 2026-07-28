@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using BepInEx;
-using BepInEx.Configuration;
 using Comfort.Common;
 using EFT;
 using UnityEngine;
@@ -63,10 +62,8 @@ namespace Blackout
         private static readonly Vector3 WhiteboardPos = new Vector3(-135.766f, 0.119f, -335.513f);
         private static readonly Quaternion WhiteboardRot = new Quaternion(-0.5f, -0.5f, -0.5f, 0.5f);
 
-        // the only F12 option: a master on/off. everything else is fixed at the values tuned against
-        // the live event, so the menu stays a single toggle
-        private ConfigEntry<bool> _modEnabled;
-
+        // no F12 options at all. Everything is fixed at the values tuned against the live event, and
+        // turning the event off is the server's job - blackoutChance 0 in config.json and no raid rolls
         private const bool LabsOnly = true;   // Labs only, no other map
         private const float DelaySeconds = 15f;
         private const float AmbientLevel = 0f;   // full black, like the live event
@@ -186,11 +183,6 @@ namespace Blackout
         private void Awake()
         {
             Instance = this;
-            _modEnabled = Config.Bind(
-                "1. General",
-                "Enable Mod",
-                true,
-                "Master toggle - enables or disables the entire mod");
 
             // what to do when the bridge tells us someone else did something. Left unset when Fika
             // isn't installed, in which case none of this is ever reached
@@ -720,21 +712,19 @@ namespace Blackout
                 return;
             }
 
-            if (!_doorsLocked && _modEnabled.Value
-                && (!LabsOnly || gameWorld.LocationId == LabsLocationId))
+            if (!_doorsLocked && (!LabsOnly || gameWorld.LocationId == LabsLocationId))
             {
                 _doorsLocked = true;
                 LockEventDoors();
             }
 
             // exfil points initialize later in the load than doors do - poll until they exist
-            if (!_exfilsDumped && _modEnabled.Value
-                && (!LabsOnly || gameWorld.LocationId == LabsLocationId))
+            if (!_exfilsDumped && (!LabsOnly || gameWorld.LocationId == LabsLocationId))
             {
                 _exfilsDumped = DumpExfils();
             }
 
-            if (!_lockdownApplied && _modEnabled.Value && gameWorld.LocationId == LabsLocationId)
+            if (!_lockdownApplied && gameWorld.LocationId == LabsLocationId)
             {
                 _lockdownApplied = ApplyExtractLockdown();
             }
@@ -768,15 +758,6 @@ namespace Blackout
                 {
                     CloseKeypad();
                 }
-            }
-
-            if (!_modEnabled.Value)
-            {
-                if (_blackoutActive)
-                {
-                    RestoreEverything();
-                }
-                return;
             }
 
             if (_blackoutActive)
@@ -1373,64 +1354,6 @@ namespace Blackout
                 }
             }
             return light.GetComponentInParent<Player>() != null;
-        }
-
-        private void RestoreEverything()
-        {
-            _blackoutActive = false;
-            _clockStarted = false;
-
-            foreach (var state in _killedLights)
-            {
-                if (state.Light != null)
-                {
-                    state.Light.enabled = true;
-                    state.Light.intensity = state.Intensity;
-                }
-            }
-            _killedLights.Clear();
-            _trackedLights.Clear();
-
-            foreach (var lamp in _switchedLamps)
-            {
-                if (lamp == null)
-                {
-                    continue;
-                }
-                try
-                {
-                    lamp.Switch(EFT.Interactive.Turnable.EState.On);
-                }
-                catch
-                {
-                    // keep restoring the rest
-                }
-            }
-            _switchedLamps.Clear();
-            _trackedLamps.Clear();
-
-            foreach (var root in _disabledLightObjects)
-            {
-                if (root != null)
-                {
-                    root.SetActive(true);
-                }
-            }
-            _disabledLightObjects.Clear();
-
-            if (_originalLightmaps != null)
-            {
-                LightmapSettings.lightmaps = _originalLightmaps;
-                _originalLightmaps = null;
-            }
-            RenderSettings.ambientIntensity = _originalAmbientIntensity;
-            RenderSettings.ambientLight = _originalAmbientLight;
-            RenderSettings.reflectionIntensity = _originalReflectionIntensity;
-            RestoreEmissiveMaterials();
-            RestoreAmbient();
-            DestroyEmergencyLights();
-
-            Logger.LogInfo("[Blackout] Power restored (mod disabled mid-raid)");
         }
 
         private void OnGUI()
