@@ -115,9 +115,9 @@ namespace Blackout
         private readonly List<EFT.Interactive.LampController> _switchedLamps = new List<EFT.Interactive.LampController>();
         private readonly HashSet<EFT.Interactive.LampController> _trackedLamps = new HashSet<EFT.Interactive.LampController>();
         private readonly List<GameObject> _disabledLightObjects = new List<GameObject>();
-        // the vehicles spared from the light-scene kill, and the parent chain that has to stay
+        // the solid props spared from the light-scene kill, and the parent chain that has to stay
         // active for them to render - scratch sets, only meaningful during the sweep
-        private readonly HashSet<Transform> _lightSceneVehicles = new HashSet<Transform>();
+        private readonly HashSet<Transform> _lightSceneProps = new HashSet<Transform>();
         private readonly HashSet<Transform> _lightSceneKeepPath = new HashSet<Transform>();
 
         private LightmapData[] _originalLightmaps;
@@ -1039,26 +1039,42 @@ namespace Blackout
                     continue;
                 }
 
-                // one pass to mark what survives: each vehicle, and the chain of parents holding it
-                var vehicles = _lightSceneVehicles;
+                // One pass to mark what survives: every solid prop, and the chain of parents holding
+                // it. A LAMPS group is not just lamps - the parking vehicles, the server room racks,
+                // vent modules, steam pipes and desk lamps all live in there too, because they glow.
+                // A *_BALLISTIC_* child is what separates them: 243 objects in this scene carry one
+                // and are real shootable geometry, the other 929 are ceiling lights and emissive
+                // planes with none. Their own lights still die - the light sweep and the emissive
+                // pass both run after this and neither cares whether we kept the object
+                var props = _lightSceneProps;
                 var keepPath = _lightSceneKeepPath;
-                vehicles.Clear();
+                props.Clear();
                 keepPath.Clear();
                 foreach (var root in scene.GetRootGameObjects())
                 {
                     foreach (var tr in root.GetComponentsInChildren<Transform>(true))
                     {
-                        if (tr.name.IndexOf("Car_light_sourse", StringComparison.OrdinalIgnoreCase) < 0)
+                        if (tr.name.IndexOf("_BALLISTIC", StringComparison.OrdinalIgnoreCase) < 0)
                         {
                             continue;
                         }
+                        // the prop's own root, so its meshes and LODs survive with it: normally the
+                        // node hanging off a LAMPS group, since the ballistic mesh can sit several
+                        // levels down inside a car. 83 of them (table lamps) hang straight off an
+                        // area instead and never see a LAMPS parent, so fall back to the node
+                        // holding the ballistic mesh
+                        var propRoot = tr.parent;
                         for (var node = tr; node != null; node = node.parent)
                         {
                             keepPath.Add(node);
                             if (node.parent != null && node.parent.name == "LAMPS")
                             {
-                                vehicles.Add(node);
+                                propRoot = node;
                             }
+                        }
+                        if (propRoot != null)
+                        {
+                            props.Add(propRoot);
                         }
                     }
                 }
@@ -1068,9 +1084,9 @@ namespace Blackout
                 {
                     SweepLightScene(root);
                 }
-                // no vehicles found (another map, or BSG renamed the node) means keepPath is empty
+                // no props found (another map, or BSG renamed the meshes) means keepPath is empty
                 // and every root goes off - the old blanket behaviour, which is the safe direction
-                Logger.LogInfo($"[Blackout] Light scene '{scene.name}': {_disabledLightObjects.Count - before} objects off, {vehicles.Count} vehicles left standing");
+                Logger.LogInfo($"[Blackout] Light scene '{scene.name}': {_disabledLightObjects.Count - before} objects off, {props.Count} solid props left standing");
             }
         }
 
@@ -1081,7 +1097,7 @@ namespace Blackout
                 return;
             }
             var tr = go.transform;
-            if (_lightSceneVehicles.Contains(tr))
+            if (_lightSceneProps.Contains(tr))
             {
                 return;
             }
