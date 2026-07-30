@@ -429,7 +429,10 @@ namespace BlackoutServer
         private readonly DatabaseService _databaseService;
         private readonly RandomUtil _randomUtil;
         private readonly ISptLogger<BlackoutSpawnController> _logger;
-        private readonly double _chance;
+        // reloaded before every roll, not just at startup, so editing config.json between raids takes
+        // effect without restarting the server (which in practice meant closing the game). Seeded with
+        // the default so the first read has something to fall back to
+        private double _chance = DefaultChance;
 
         // the server owns the coin flip: the Wedge is a server-side spawn baked into the location
         // before the client is even in the raid, so the roll has to live here. the client reads the
@@ -447,9 +450,12 @@ namespace BlackoutServer
             _randomUtil = randomUtil;
             _logger = logger;
             _chance = LoadChance();
+            _logger.Success($"[Blackout] blackout chance {_chance}% per Labs raid (from config.json).");
         }
 
-        // config.json sits next to our dll, copy-if-missing on install so a player's edit survives updates
+        // config.json sits next to our dll, copy-if-missing on install so a player's edit survives updates.
+        // Returns the current value on any failure rather than the default - a read that lands mid-save
+        // would otherwise silently drop a 100% config back to 25 for the next raid
         private double LoadChance()
         {
             try
@@ -467,17 +473,15 @@ namespace BlackoutServer
                         });
                     if (doc.RootElement.TryGetProperty("blackoutChance", out var v))
                     {
-                        var chance = Math.Clamp(v.GetDouble(), 0, 100);
-                        _logger.Success($"[Blackout] blackout chance {chance}% per Labs raid (from config.json).");
-                        return chance;
+                        return Math.Clamp(v.GetDouble(), 0, 100);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.Warning($"[Blackout] config.json unreadable, using {DefaultChance}%: {ex.Message}");
+                _logger.Warning($"[Blackout] config.json unreadable, staying on {_chance}%: {ex.Message}");
             }
-            return DefaultChance;
+            return _chance;
         }
 
         public int Inject()
@@ -493,6 +497,15 @@ namespace BlackoutServer
             // identified by boss type - the base Labs map only spawns pmcBot as bosses, so removing the
             // Wedge is safe and makes re-injection idempotent
             spawns.RemoveAll(s => s.BossName == BlackoutBots.WedgeName);
+
+            // pick up a config edit made since the last raid. Only says anything when the number
+            // actually moved, so a normal raid stays quiet but your edit confirms itself
+            var chance = LoadChance();
+            if (chance != _chance)
+            {
+                _logger.Success($"[Blackout] blackout chance changed to {chance}% (was {_chance}%).");
+                _chance = chance;
+            }
 
             // roll for this raid. a failed roll leaves Labs completely vanilla - no Wedge here, and the
             // client reads the same result and skips the darkness, lockdown, keypads and the locked door
