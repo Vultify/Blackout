@@ -4,6 +4,12 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-07-29
+### Fixed
+- The server room racks no longer vanish when the lights cut. Labs' light scene holds solid props as well as light fixtures, and the darkening pass was switching whole rooms off to reach the lights inside them. It now keeps anything carrying a collision mesh and darkens it where it stands, the same way the parking vehicles were already handled. The vent modules, steam pipes and desk lamps were disappearing for the same reason and come back with it
+### Changed
+- `blackoutChance` is re-read before every roll instead of once at server start, so editing `config.json` takes effect on your next raid without restarting the server
+
 ## [2.1.0] - 2026-07-27
 ### Added
 - **Fika co-op support.** A blackout raid now runs the same for everyone in it: the lights cut for the whole group at once, the admin office switch opens the gates for every player and not just the one who pulled it, and a keycard door someone else opens with the code is open for you too

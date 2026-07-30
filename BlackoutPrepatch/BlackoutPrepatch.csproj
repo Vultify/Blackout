@@ -4,7 +4,7 @@
     <TargetFramework>net471</TargetFramework>
     <AssemblyName>BlackoutPrepatch</AssemblyName>
     <RootNamespace>BlackoutPrepatch</RootNamespace>
-    <Version>2.1.0</Version>
+    <Version>2.1.1</Version>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
