@@ -84,6 +84,17 @@ namespace Blackout
         private bool _eventThisRaid;
 
         private bool _inRaid;
+        // Raid setup can't run in one go: exfil points, the timers panel and the two donor props all
+        // appear at different moments during a Labs load, so each step polls until the scene catches
+        // up. That polling used to run every frame - two GameObject.Find calls plus a reflection walk
+        // over ExtractionTimersPanel's private fields, on a map whose light scene alone is 18k objects,
+        // every frame for the whole load. Four times a second finds everything just as fast
+        private const float SetupPollInterval = 0.25f;
+        // and if a step never resolves, stop rather than polling it for the entire raid
+        private const float SetupTimeoutSec = 180f;
+        private float _nextSetupPoll;
+        private float _setupUntil;
+        private bool _setupGaveUp;
         private bool _doorsLocked;
         private bool _exfilsDumped;
         private bool _lockdownApplied;
@@ -666,6 +677,9 @@ namespace Blackout
                     _raidRolled = false;
                     _eventThisRaid = false;
                     _doorsLocked = false;
+                    _nextSetupPoll = 0f;
+                    _setupUntil = 0f;
+                    _setupGaveUp = false;
                     _exfilsDumped = false;
                     _lockdownApplied = false;
                     _exfilRowsHidden = false;
@@ -712,42 +726,7 @@ namespace Blackout
                 return;
             }
 
-            if (!_doorsLocked && (!LabsOnly || gameWorld.LocationId == LabsLocationId))
-            {
-                _doorsLocked = true;
-                LockEventDoors();
-            }
-
-            // exfil points initialize later in the load than doors do - poll until they exist
-            if (!_exfilsDumped && (!LabsOnly || gameWorld.LocationId == LabsLocationId))
-            {
-                _exfilsDumped = DumpExfils();
-            }
-
-            if (!_lockdownApplied && gameWorld.LocationId == LabsLocationId)
-            {
-                _lockdownApplied = ApplyExtractLockdown();
-            }
-
-            if (_lockdownApplied && !_exfilRowsHidden)
-            {
-                _exfilRowsHidden = HideDisabledExfilRows();
-            }
-
-            if (_lockdownApplied && !_adminSwitchSpawned)
-            {
-                _adminSwitchSpawned = SpawnAdminSwitch();
-            }
-
-            if (_adminSwitchSpawned && !_whiteboardSpawned)
-            {
-                _whiteboardSpawned = SpawnWhiteboard();
-            }
-
-            if (_lockdownApplied && !_rampsBlocked && !_gatesActivated)
-            {
-                _rampsBlocked = BlockGateRamps();
-            }
+            RunSetupPolls(gameWorld);
 
             // walked away, died, or the blackout ended - drop the keypad and give input back
             if (_keypadDoor != null)
@@ -836,6 +815,81 @@ namespace Blackout
             }
 
             ActivateBlackout();
+        }
+
+        // Each step below waits on something the scene hasn't finished building, so they retry until
+        // they take. Off Labs there is nothing to set up at all, and once everything has landed this
+        // stops touching the scene entirely.
+        private void RunSetupPolls(GameWorld gameWorld)
+        {
+            var onLabs = gameWorld.LocationId == LabsLocationId;
+            if (_setupGaveUp || (LabsOnly && !onLabs))
+            {
+                return;
+            }
+
+            // ramps only matter until the gates open, so treat a pulled switch as that step done
+            if (_doorsLocked && _exfilsDumped && _lockdownApplied && _exfilRowsHidden
+                && _adminSwitchSpawned && _whiteboardSpawned && (_rampsBlocked || _gatesActivated))
+            {
+                return;
+            }
+            if (Time.time < _nextSetupPoll)
+            {
+                return;
+            }
+            _nextSetupPoll = Time.time + SetupPollInterval;
+            if (_setupUntil == 0f)
+            {
+                _setupUntil = Time.time + SetupTimeoutSec;
+            }
+
+            if (!_doorsLocked)
+            {
+                _doorsLocked = true;
+                LockEventDoors();
+            }
+
+            // exfil points initialize later in the load than doors do
+            if (!_exfilsDumped)
+            {
+                _exfilsDumped = DumpExfils();
+            }
+
+            if (!_lockdownApplied && onLabs)
+            {
+                _lockdownApplied = ApplyExtractLockdown();
+            }
+
+            if (_lockdownApplied && !_exfilRowsHidden)
+            {
+                _exfilRowsHidden = HideDisabledExfilRows();
+            }
+
+            if (_lockdownApplied && !_adminSwitchSpawned)
+            {
+                _adminSwitchSpawned = SpawnAdminSwitch();
+            }
+
+            if (_adminSwitchSpawned && !_whiteboardSpawned)
+            {
+                _whiteboardSpawned = SpawnWhiteboard();
+            }
+
+            if (_lockdownApplied && !_rampsBlocked && !_gatesActivated)
+            {
+                _rampsBlocked = BlockGateRamps();
+            }
+
+            // something never showed up. Say which, once, and stop searching for it all raid
+            if (Time.time > _setupUntil)
+            {
+                _setupGaveUp = true;
+                Logger.LogWarning($"[Blackout] Setup incomplete after {SetupTimeoutSec:0}s, no longer retrying"
+                    + $" - doors={_doorsLocked} exfils={_exfilsDumped} lockdown={_lockdownApplied}"
+                    + $" rows={_exfilRowsHidden} switch={_adminSwitchSpawned} board={_whiteboardSpawned}"
+                    + $" ramps={_rampsBlocked}");
+            }
         }
 
         private void ActivateBlackout()
