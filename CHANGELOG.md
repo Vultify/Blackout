@@ -4,6 +4,14 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-02
+### Removed
+- **The Wedge and his Black Division guards.** WTT's Black Division mod added the Wedge itself recently, so running both meant two of him. Blackout no longer spawns either — install Black Division alongside it if you want him holding the floors.
+- **Two dependencies, with them.** WTT-ContentBackport and MoreBotsAPI were only ever there for Wedge's gear and his bot type, and are no longer required. The prepatcher is gone too, so there is nothing left to install in `BepInEx/patchers/`.
+### Changed
+- The arsenal key now spawns on the boss's desk in the manager's office instead of being carried by the Wedge. The manager's office is locked in its own right, so the arsenal is two keys deep rather than a boss drop. Still single use, still the only way in.
+- Raid setup polls four times a second instead of running every frame — the old path ran two `GameObject.Find` calls plus a reflection walk per frame for the whole Labs load.
+
 ## [2.1.1] - 2026-07-29
 ### Fixed
 - The server room racks no longer vanish when the lights cut. Labs' light scene holds solid props as well as light fixtures, and the darkening pass was switching whole rooms off to reach the lights inside them. It now keeps anything carrying a collision mesh and darkens it where it stands, the same way the parking vehicles were already handled. The vent modules, steam pipes and desk lamps were disappearing for the same reason and come back with it

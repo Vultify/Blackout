@@ -6,7 +6,7 @@
     <RootNamespace>BlackoutServer</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>2.1.1</Version>
+    <Version>3.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,10 +28,6 @@
     </Reference>
     <Reference Include="WTT-ServerCommonLib">
       <HintPath>$(SPT_PATH)\SPT\user\mods\WTT-ServerCommonLib\WTT-ServerCommonLib.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="MoreBotsServer">
-      <HintPath>$(SPT_PATH)\SPT\user\mods\MoreBotsServer\MoreBotsServer.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

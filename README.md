@@ -1,6 +1,6 @@
 # Blackout
 
-Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the generators die, the lights go out, and you run the facility on emergency power - while the Wedge and his Black Division hold the floors.
+Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the generators die, the lights go out, and you run the facility on emergency power.
 
 ## The blackout
 
@@ -10,13 +10,11 @@ Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the gene
 - Extract lockdown: only the two gates are live, and one press of the admin office switch (the event's own switch, at its exact pose) opens both
 - Keycard doors take a 4-digit emergency code during the blackout instead of swipes - the code is fresh every raid and written on the admin office whiteboard in the event's own marker digits
 
-## The Wedge and Black Division
+## The arsenal
 
-- The Wedge holds Labs on a blackout raid with 4-5 Black Division Guards - no waves, one boss and his escort, our own bot types rather than a dependency on anyone else's
-- He and his guards are set friendly toward WTT's separate Black Division mod, so you can run both and let their spawns fill the raid out around him
-- His real live loadout: the MP7A1 "Wedge" preset with the suppressor always on, his own face, clothing and voicelines from the live files, the M53A1 gas mask, EXFIL helmet and LV-119 Icebreaker
-- SAIN runs their combat when installed (the Wedge under the Bosses tab at boss grade, his guards under their own "Black Division" tab at raider grade); without SAIN they fall back to PMC brains
-- The Wedge always carries the **TerraGroup Labs arsenal storage room key** - single use, opens the arsenal, and the door can't be breached. Killing him is the way in
+The **TerraGroup Labs arsenal storage room key** spawns on the boss's desk in the manager's office on a blackout raid - single use, opens the arsenal, and the door can't be breached. The manager's office is itself locked, so it's the manager's office key first, then the arsenal.
+
+The Wedge and his Black Division guards used to be part of this mod. They aren't any more - WTT's **Black Division** mod adds the Wedge itself now, so keeping our own meant two of him. Run that alongside Blackout if you want him holding the floors.
 
 ## Config
 
@@ -38,18 +36,13 @@ This lives in a **separate Blackout Fika addon** on the Forge rather than in the
 
 - SPT 4.0.x
 - WTT-CommonLib **2.0.22 or newer** - both halves (WTT-ServerCommonLib and WTT-ClientCommonLib)
-- WTT-ContentBackport **1.1.0 or newer** - both halves (server and client). Wedge's gear, face, clothing and
-  voice are all Content Backport items, so an older version leaves him with nothing
-- MoreBotsAPI - both halves (server and prepatcher)
-- SAIN recommended, not required
-- WTT's Black Division mod optional - the Wedge and his guards are friendly toward it
+- WTT's Black Division mod optional - it brings the Wedge, which this mod no longer does
 - Fika optional - with it plus the Blackout Fika addon, co-op raids sync themselves, see [Co-op](#co-op)
 
 ## Structure
 
-- `BlackoutPrepatch/` - prepatcher, registers the Wedge and Black Division spawn types
 - `Blackout/` - client BepInEx plugin (darkness, sounds, door locks, keypad)
-- `BlackoutServer/` - server mod (items, bots, spawns, the arsenal key)
+- `BlackoutServer/` - server mod (the raid roll and the arsenal key)
 - `BlackoutFika/` - the co-op bridge, published as its own Forge addon rather than shipped here
 - `blackout_sounds.bundle` - the live event's audio, extracted and repacked
 

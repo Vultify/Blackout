@@ -11,13 +11,10 @@ using UnityEngine.Audio;
 
 namespace Blackout
 {
-    [BepInPlugin("com.vultify.blackout", "Blackout", "2.1.1")]
-    // the client half of WTT-CommonLib and WTT-ContentBackport must be present, or the Wedge's gear and
-    // the Admin key resolve to nothing client-side. hard-depend so a missing half errors clearly
-    // minimum versions, not just hard depends - Wedge's gear lives in Content Backport's bundles now, and an
-    // older client half loads fine while leaving every one of his items invisible
+    [BepInPlugin("com.vultify.blackout", "Blackout", "3.0.0")]
+    // the client half of WTT-CommonLib must be present or the Admin key resolves to nothing
+    // client-side. hard-depend so a missing half errors clearly
     [BepInDependency("com.wtt.commonlib", "2.0.22")]
-    [BepInDependency("com.wtt.contentbackport", "1.1.0")]
     public class BlackoutPlugin : BaseUnityPlugin
     {
         private const string LabsLocationId = "laboratory";
@@ -33,7 +30,7 @@ namespace Blackout
 
         // the two vehicle-gate ramps, sized from their bot-zone spawn clusters plus margin. Live only
         // sends Black Division behind the gates AFTER the button press, so until the switch fires these
-        // volumes are carved off the AI navmesh - nobody (least of all the key-carrying Wedge) can
+        // volumes are carved off the AI navmesh - nobody can
         // wander behind a gate the player cannot open yet
         private static readonly Vector3[] RampCenters =
         {
@@ -76,10 +73,8 @@ namespace Blackout
             "The facility has been switched to emergency power. Please remain where you are and await evacuation.";
 
         // this raid's coin flip, fetched from the server once on entering Labs. the server owns the roll
-        // because the Wedge is baked into the location before we load in; reading it here keeps the
-        // darkness, lockdown, keypads and the locked arsenal door on the same flip as the boss.
-        // defaults to OFF on any failure - a wrongly-dark raid with no Wedge means no key for the
-        // arsenal door, which is worse than a plain raid
+        // reading it here keeps the darkness, lockdown, keypads and the locked arsenal door on the
+        // same flip for every client in the raid. defaults to OFF on any failure
         private bool _raidRolled;
         private bool _eventThisRaid;
 
@@ -720,7 +715,7 @@ namespace Blackout
             _inRaid = true;
 
             // the whole event rides one server-side roll: no roll, no darkness, no lockdown, no keypad,
-            // no locked arsenal door, and no Wedge either - the raid is plain Labs
+            // and no locked arsenal door - the raid is plain Labs
             if (gameWorld.LocationId == LabsLocationId && !EventRollForThisRaid())
             {
                 return;

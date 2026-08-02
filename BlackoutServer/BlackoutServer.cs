@@ -22,11 +22,10 @@ namespace BlackoutServer
         public override string Author { get; init; } = "Vultify";
         public override string License { get; init; } = "MIT";
         public override string Url { get; init; } = "";
-        // no bundles of our own any more - Wedge's gear is Content Backport's, and it serves them
         public override bool? IsBundleMod { get; init; } = false;
 
         public override SemanticVersioning.Version Version { get; init; }
-            = new SemanticVersioning.Version("2.1.1", false);
+            = new SemanticVersioning.Version("3.0.0", false);
 
         public override SemanticVersioning.Range SptVersion { get; init; }
             = new SemanticVersioning.Range("~4.0.13", false);
@@ -35,60 +34,18 @@ namespace BlackoutServer
         public override List<string> Incompatibilities { get; init; } = new();
         public override Dictionary<string, SemanticVersioning.Range> ModDependencies { get; init; } = new()
         {
-            // 2.0.22 is what Content Backport 1.1.0 itself requires - an older one loads but leaves CB broken
+            // creates the Admin's key. the only dependency left now the Black Division is gone
             { "com.wtt.commonlib", new SemanticVersioning.Range(">=2.0.22") },
-            // 1.1.0 is a hard floor now: every piece of Wedge's gear, his face, clothing and voice are
-            // Content Backport items, and they don't exist before it
-            { "com.wtt.contentbackport", new SemanticVersioning.Range(">=1.1.0") },
-            // the Wedge is our own MoreBotsAPI boss type
-            { "com.morebotsapi.tacticaltoaster", new SemanticVersioning.Range(">=2.0.0") },
         };
     }
 
-    // The event's Admin's key (db/CustomItems/blackout_key.json), created through WTT-CommonLib. It's the
-    // only item the mod still adds - Wedge's gear all comes from Content Backport now, so the rest of this
-    // class is slot wiring CB doesn't do, plus assertions that its items actually turned up.
-    // Runs post-DB so the clone donor already exists.
+    // The event's Admin's key (db/CustomItems/blackout_key.json), created through WTT-CommonLib.
+    // The only item the mod adds. Runs post-DB so the clone donor already exists.
     [Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 4)]
     public class BlackoutCustomItems : IOnLoad
     {
         // the live event's Admin's key, real 1.0.6.5 item id - opens the system admin office
         private const string AdminKey = "6a33c17933cff6b88c08902e";
-
-        // MP7 host weapons + the two mod items whose slot chain we wire by hand
-        private const string Mp7a1 = "5ba26383d4351e00334c93d9";
-        private const string Mp7a2 = "5bd70322209c4d00d7167b8f";
-        private const string ArsAdapter = "69985e9146e48aa39d06a685";
-        private const string FxKposStock = "69985e7819f8713b630de3d6";
-        private const string Sf3pMuzzle = "69985fa69f79621e1d0f58f5";
-
-        // SureFire SOCOM556 suppressors that mount on an SF3P flash hider (same set the real AR15 SF3P takes)
-        private static readonly string[] Socom556Suppressors =
-        {
-            "55d6190f4bdc2d87028b4567", // Mini Monster
-            "55d614004bdc2d86028b4568", // Monster
-            "5ea17bbc09aa976f2e7a51cd", // RC2
-        };
-
-        // Content Backport's black AN/PEQ-15 is a new clone id, so it's absent from every vanilla weapon's
-        // tactical filter - the MP7 must be told to accept it (matches Wedge's real preset).
-        private const string AnPeq15Black = "68bedc0365e7dcf94f0cb0fc";
-
-        // all Content Backport's, as of its 1.1.0. Wedge wears the VANILLA black EXFIL now: CB adds a
-        // mod_equipment_002 slot to it in code and puts its own cover in there, which is what our repacked
-        // helmet used to exist for.
-        private const string ExfilMulticamHelmet = "69c26722bf4ff19f50057643";
-        private const string WedgeCoverHelmet = "69e24f4f9e6ca1b32508bfbc";
-        private const string BlackExfilHelmet = "5e00c1ad86f774747333222c";
-        private const string CoyoteExfilHelmet = "5e01ef6886f77445f643baa4";
-        // the helmet-mounted variant, not CB's standalone black ComTac VI
-        private const string ComTacVIBlack = "69c264c00f660b3f0d058fcf";
-
-        // Spiritus LV-119: Content Backport 1.1.0 ships this rig itself, with the same 15 pouches, its own
-        // klin_rig layout and a preset that installs both soft armor inserts and both plates - so we use
-        // theirs rather than duplicating it. Ours used to live here and collided with their bundle.
-        private const string Lv119Rig = "69e2441a18cb3157560855ec";
-        private const string Lv119Layout = "klin_rig";
 
         private readonly WTTServerCommonLib.WTTServerCommonLib _commonLib;
         private readonly DatabaseService _databaseService;
@@ -112,43 +69,7 @@ namespace BlackoutServer
 
                 var items = _databaseService.GetItems();
 
-                // Content Backport's addtoModSlots should already put the adapter and the SF3P on the MP7,
-                // but do it anyway - it's idempotent, and depending on another mod's load order for whether
-                // Wedge has a stock and a suppressor is not worth the risk
-                AddToSlot(items, Mp7a1, "mod_stock", ArsAdapter);
-                AddToSlot(items, Mp7a2, "mod_stock", ArsAdapter);
-                AddToSlot(items, Mp7a1, "mod_muzzle", Sf3pMuzzle);
-                AddToSlot(items, Mp7a2, "mod_muzzle", Sf3pMuzzle);
-                // the adapter accepts only the FX-KPOS stock, which CB does not wire
-                SetSlotFilter(items, ArsAdapter, "mod_stock", FxKposStock);
-                // the SF3P's own mod_muzzle accepts the SOCOM556 suppressors, not the inherited MP7 Rotex.
-                // NOT _required - the gunsmith paints a required-but-empty slot red (no vanilla muzzle
-                // device requires its can); the Wedge's always-on suppressor is enforced per-role in
-                // BlackoutBots instead, where only bot generation can see it
-                var sf3pMuzzleSlot = FindSlot(items, Sf3pMuzzle, "mod_muzzle")?.Properties?.Filters?.FirstOrDefault();
-                if (sf3pMuzzleSlot != null)
-                {
-                    sf3pMuzzleSlot.Filter = new HashSet<MongoId>(Socom556Suppressors.Select(id => new MongoId(id)));
-                }
-                // the black AN/PEQ-15 goes in every MP7 tactical slot (all three, so it mounts anywhere the
-                // vanilla one does) - without this the gunsmith rejects it since it's a new backport id
-                foreach (var slot in new[] { "mod_tactical_000", "mod_tactical_001", "mod_tactical_002" })
-                {
-                    AddToSlot(items, Mp7a1, slot, AnPeq15Black);
-                    AddToSlot(items, Mp7a2, slot, AnPeq15Black);
-                }
-
-                // no armour presets and no cover slot here any more - Content Backport ships a preset for its
-                // MultiCam helmet, and adds the mod_equipment_002 cover slot to the vanilla black EXFIL itself
-
-                // the black ComTac VI is a helmet-mounted headset and CB does NOT slot it anywhere
-                // (addtoModSlots false), so the EXFIL helmets still have to be told to accept it
-                foreach (var helmet in new[] { BlackExfilHelmet, CoyoteExfilHelmet, ExfilMulticamHelmet })
-                {
-                    AddToSlot(items, helmet, "mod_equipment_000", ComTacVIBlack);
-                }
-
-                // the Admin's key is the only item Blackout still creates; everything else is CB's
+                // the Admin's key is the only item Blackout adds
                 var made = items.ContainsKey(new MongoId(AdminKey)) ? 1 : 0;
 
                 // single use; a wrong clone would silently inherit the donor's usage limit instead
@@ -160,270 +81,25 @@ namespace BlackoutServer
                     .FirstOrDefault(i => i.Id == new MongoId(AdminKey))?.Price;
                 _databaseService.GetPrices().TryGetValue(new MongoId(AdminKey), out var keyFlea);
 
-                // Content Backport's, not ours - assert it landed, because a silently missing cover slot is
-                // the difference between Wedge wearing his helmet cover and not
-                var coverSlot = SlotContains(items, BlackExfilHelmet, "mod_equipment_002", WedgeCoverHelmet);
-                var comtacMounted = SlotContains(items, BlackExfilHelmet, "mod_equipment_000", ComTacVIBlack);
-                // the two filter patches the gunsmith AND bot generation both depend on - assert the
-                // written state, a silent FindSlot miss here is exactly how a suppressor vanishes.
-                // Required must stay FALSE or the gunsmith flags a bare SF3P as an incomplete part
-                var socomOnSf3p = SlotContains(items, Sf3pMuzzle, "mod_muzzle", Socom556Suppressors[0])
-                    && FindSlot(items, Sf3pMuzzle, "mod_muzzle")?.Required != true;
-                var peqOnMp7 = SlotContains(items, Mp7a1, "mod_tactical_000", AnPeq15Black);
-
-                // the rig is Content Backport's now - assert it actually turned up rather than assuming the
-                // dependency shipped what we expect, since Wedge's armour is unwearable without it
-                items.TryGetValue(new MongoId(Lv119Rig), out var rig);
-                var rigGrids = rig?.Properties?.Grids?.Count() ?? 0;
-                var rigLayout = rig?.Properties?.RigLayoutName ?? "(none)";
-
-                if (made == 1 && keyUses == 1 && keySellable == true && keyHandbook == 100000 && keyFlea == 157434
-                    && SlotContains(items, Mp7a1, "mod_stock", ArsAdapter)
-                    && SlotContains(items, Mp7a1, "mod_muzzle", Sf3pMuzzle) && coverSlot && comtacMounted
-                    && socomOnSf3p && peqOnMp7
-                    && rigGrids == 15 && rigLayout == Lv119Layout)
+                if (made != 1 || keyUses != 1 || keySellable != true
+                    || keyHandbook != 100000 || keyFlea != 157434)
                 {
-                    // everything above is asserted, not just counted, and a pass says nothing - the detail
-                    // only prints on failure. Most of it is Content Backport's gear now, so this doubles as
-                    // a check that the dependency still ships what Wedge's loadout expects
-                }
-                else
-                {
-                    _logger.Error($"[Blackout] Gear incomplete - admin key {made}/1, key uses {keyUses} (want 1), " +
-                        $"key sellable {keySellable}, handbook {keyHandbook} (want 100000), flea {keyFlea} (want 157434), " +
-                        $"adapter on MP7 {SlotContains(items, Mp7a1, "mod_stock", ArsAdapter)}, " +
-                        $"SF3P on MP7 {SlotContains(items, Mp7a1, "mod_muzzle", Sf3pMuzzle)}, " +
-                        $"cover slot {coverSlot}, ComTac VI {comtacMounted}, " +
-                        $"SOCOM on SF3P {socomOnSf3p}, black PEQ on MP7 {peqOnMp7}, " +
-                        $"CB LV-119 {rigGrids} pouches, layout '{rigLayout}'; check the CB version.");
+                    _logger.Error($"[Blackout] Admin key incomplete - created {made}/1, uses {keyUses} (want 1), " +
+                        $"sellable {keySellable}, handbook {keyHandbook} (want 100000), flea {keyFlea} (want 157434).");
                 }
             }
             catch (Exception ex)
             {
-                _logger.Error($"[Blackout] Wedge gear load failed: {ex}");
-            }
-        }
-
-        private static Slot? FindSlot(IDictionary<MongoId, TemplateItem> items, string hostId, string slotName)
-        {
-            return items.TryGetValue(new MongoId(hostId), out var host)
-                ? host.Properties?.Slots?.FirstOrDefault(s => s.Name == slotName)
-                : null;
-        }
-
-        private static bool SlotContains(IDictionary<MongoId, TemplateItem> items, string hostId, string slotName, string modId)
-        {
-            var f = FindSlot(items, hostId, slotName)?.Properties?.Filters?.FirstOrDefault();
-            return f?.Filter?.Contains(new MongoId(modId)) ?? false;
-        }
-
-        private static void AddToSlot(IDictionary<MongoId, TemplateItem> items, string hostId, string slotName, string modId)
-        {
-            var filter = FindSlot(items, hostId, slotName)?.Properties?.Filters?.FirstOrDefault();
-            if (filter?.Filter != null && !filter.Filter.Contains(new MongoId(modId)))
-            {
-                filter.Filter.Add(new MongoId(modId));
-            }
-        }
-
-        private static void SetSlotFilter(IDictionary<MongoId, TemplateItem> items, string hostId, string slotName, string onlyModId)
-        {
-            var filter = FindSlot(items, hostId, slotName)?.Properties?.Filters?.FirstOrDefault();
-            if (filter != null)
-            {
-                filter.Filter = new HashSet<MongoId> { new MongoId(onlyModId) };
+                _logger.Error($"[Blackout] Admin key load failed: {ex}");
             }
         }
     }
 
-    // The Wedge and his guards share this faction, so they never fight each other. We register it
-    // ourselves at LoadFactions so it exists before any hostility wiring.
-    [Injectable(TypePriority = MoreBotsServer.MoreBotsLoadOrder.LoadFactions + 1)]
-    public class BlackoutFaction : IOnLoad
-    {
-        public const string FactionName = "blackdivision";
-
-        private readonly MoreBotsServer.Services.FactionService _factionService;
-        private readonly ISptLogger<BlackoutFaction> _logger;
-
-        public BlackoutFaction(MoreBotsServer.Services.FactionService factionService, ISptLogger<BlackoutFaction> logger)
-        {
-            _factionService = factionService;
-            _logger = logger;
-        }
-
-        public Task OnLoad()
-        {
-            try
-            {
-                var faction = new Faction { Name = FactionName, RevengeAfterRaids = false };
-                faction.BotTypes.Add((WildSpawnType)BlackoutBots.WedgeSpawnType);
-                faction.BotTypes.Add((WildSpawnType)BlackoutBots.GuardSpawnType);
-                _factionService.Factions[FactionName] = faction;
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"[Blackout] Faction registration failed: {ex}");
-            }
-            return Task.CompletedTask;
-        }
-    }
-
-    // Creates the Wedge boss and his Black Division Guard escorts, and wires their gear and hostility.
-    // The Wedge uses our own type with our 9 backported gear items; the guards use our own type
-    // ('blackDivGuard') off the recovered BlackDiv-style loadout. Both are also set friendly toward the
-    // separate BlackDiv mod so everyone holds Labs together.
-    [Injectable(TypePriority = MoreBotsServer.MoreBotsLoadOrder.LoadBots + 1)]
-    public class BlackoutBots : IOnLoad
-    {
-        public const int WedgeSpawnType = 868588;
-        public const int GuardSpawnType = 868589;
-        public const string WedgeName = "bossWedge";
-        public const string GuardName = "blackDivGuard";
-
-        private const string ArmoryGuid = "com.wtt.armory";
-        // the separate BlackDiv mod's faction - our bots are set friendly toward it when present
-        private const string BlackDivFaction = "blackdiv";
-        private static readonly string[] EnemyFactions = { "savage", "rogues", "usec", "bear", "infected" };
-
-        private readonly MoreBotsServer.MoreBotsAPI _moreBots;
-        private readonly MoreBotsServer.Services.MoreBotsCustomBotTypeService _customBotTypeService;
-        private readonly MoreBotsServer.Services.FactionService _factionService;
-        private readonly WTTServerCommonLib.WTTServerCommonLib _commonLib;
-        private readonly DatabaseService _databaseService;
-        private readonly ConfigServer _configServer;
-        private readonly IReadOnlyList<SptMod> _modList;
-        private readonly ISptLogger<BlackoutBots> _logger;
-
-        public BlackoutBots(
-            MoreBotsServer.MoreBotsAPI moreBots,
-            MoreBotsServer.Services.MoreBotsCustomBotTypeService customBotTypeService,
-            MoreBotsServer.Services.FactionService factionService,
-            WTTServerCommonLib.WTTServerCommonLib commonLib,
-            DatabaseService databaseService,
-            ConfigServer configServer,
-            IReadOnlyList<SptMod> modList,
-            ISptLogger<BlackoutBots> logger)
-        {
-            _moreBots = moreBots;
-            _customBotTypeService = customBotTypeService;
-            _factionService = factionService;
-            _commonLib = commonLib;
-            _databaseService = databaseService;
-            _configServer = configServer;
-            _modList = modList;
-            _logger = logger;
-        }
-
-        public async Task OnLoad()
-        {
-            try
-            {
-                var assembly = Assembly.GetExecutingAssembly();
-
-                // both our types from db/bots/types + db/bots/config: the Wedge (bosswedge) and his
-                // guards (blackdivguard, off the recovered BlackDiv-style loadout)
-                await _moreBots.LoadBots(assembly);
-
-                // the ScavRole -> display-name locale (db/CustomLocales), so the kill screen reads
-                // "Black Div" instead of the raw ScavRole key
-                await _commonLib.CustomLocaleService.CreateCustomLocales(assembly, null);
-
-                // his head/top/pants/voice come from Content Backport now - it ships the same ripped-live
-                // bundles, and two mods registering the same asset paths is what broke the load
-
-                _customBotTypeService.AddCustomWildSpawnTypeNames(new Dictionary<int, string>
-                {
-                    { WedgeSpawnType, WedgeName },
-                    { GuardSpawnType, GuardName },
-                });
-
-                // keep both at 1: the Wedge is a lone boss, and a 4-5 guard escort already generates the
-                // group in parallel - a higher batch just inflates that burst into the shared-pool race
-                var botConfig = _configServer.GetConfig<BotConfig>();
-                botConfig.PresetBatch[WedgeName] = 1;
-                botConfig.PresetBatch[GuardName] = 1;
-
-                // the Wedge's suppressor must never roll off: the generator rewrites mod_muzzle chance
-                // to 95 once a muzzle device installs, and a failed roll on a role-required slot falls
-                // back to the bot's own mod pool (the SOCOM). Per-role config, so the gunsmith never
-                // sees a required slot on the SF3P item itself
-                if (!botConfig.Equipment.TryGetValue(WedgeName.ToLowerInvariant(), out var wedgeEquip) || wedgeEquip == null)
-                {
-                    wedgeEquip = new EquipmentFilters();
-                    botConfig.Equipment[WedgeName.ToLowerInvariant()] = wedgeEquip;
-                }
-                wedgeEquip.WeaponSlotIdsToMakeRequired ??= new HashSet<string>();
-                wedgeEquip.WeaponSlotIdsToMakeRequired.Add("mod_muzzle");
-
-                // the guard's loadout: base always (BlackDiv-style weapons that exist without Armory),
-                // the Armory arsenal only when WTT-Armory is installed - BlackDiv's graceful-degrade pattern
-                await _commonLib.CustomBotLoadoutService.CreateCustomBotLoadouts(assembly, null);
-                var hasArmory = _modList.Any(m => m.ModMetadata.ModGuid == ArmoryGuid);
-                if (hasArmory)
-                {
-                    await _commonLib.CustomBotLoadoutService.CreateCustomBotLoadouts(
-                        assembly, System.IO.Path.Combine("db", "ModBotLoadouts", "Armory"));
-                }
-
-                // hostility, both directions explicitly (the API's own consumers always do). the Wedge
-                // and his guards fight the player (usec/bear), scavs and rogues - everyone except Black Division.
-                var mine = new[] { WedgeName, GuardName };
-                foreach (var faction in EnemyFactions)
-                {
-                    _factionService.AddEnemyByFaction(mine, faction);
-                    _factionService.AddEnemyByFaction(faction, BlackoutFaction.FactionName);
-                }
-
-                // friendly toward the separate BlackDiv mod so the Wedge and their troops hold Labs
-                // together rather than fighting. no-ops harmlessly if that mod is not installed.
-                try
-                {
-                    _factionService.AddFriendlyByFaction(mine, BlackDivFaction);
-                    _factionService.AddFriendlyByFaction(BlackDivFaction, BlackoutFaction.FactionName);
-                }
-                catch (Exception ex)
-                {
-                    _logger.Info($"[Blackout] BlackDiv friendliness not wired (mod not present?): {ex.Message}");
-                }
-
-                // read the types back out of the database rather than trusting the calls
-                var bots = _databaseService.GetBots().Types;
-                var wedgeOk = bots.TryGetValue(WedgeName.ToLowerInvariant(), out var wedge);
-                var guardOk = bots.ContainsKey(GuardName.ToLowerInvariant());
-
-                // his head/top/pants/voice are Content Backport's - check they're actually in the
-                // customization DB, else he spawns with a broken appearance and nothing logs it
-                var cust = _databaseService.GetCustomization();
-                string[] wedgeAppearance = { "69e24393d10363e6f90064d0", "69e2427109707df7660efa26",
-                    "69e24294e0d3dc5cfd031434", "69c68f1a8f75eda7610edac4" };
-                var appearanceOk = wedgeAppearance.Count(id => cust.ContainsKey(new MongoId(id)));
-                // a clean load says nothing - only a broken one is worth a line
-                if (!wedgeOk || !guardOk || appearanceOk != 4)
-                {
-                    _logger.Error($"[Blackout] Bot load incomplete - Wedge={wedgeOk}, guard={guardOk}, " +
-                        $"Wedge appearance {appearanceOk}/4 in customization DB; " +
-                        "a silent skip means a bad type/customization file, check the WTT log above.");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"[Blackout] Bot load failed: {ex}");
-            }
-        }
-    }
-
-    // Places the Wedge and his guards on Labs. Spawn data bakes into the location at generation time,
-    // so it is injected here and re-injected after every raid.
+    // Owns the per-raid coin flip. Rolled server-side and re-rolled after every raid, so the darkness,
+    // lockdown, keypads and the locked arsenal door all ride the same result.
     [Injectable(InjectionType.Singleton)]
     public class BlackoutSpawnController
     {
-        // BOTH gate zones (Gate1 z~-225, Gate2 z~-451) are sealed ramps behind the power-gated doors -
-        // only Floor1/Floor2 are in the map's OpenZones, so the Wedge holds an open floor. He and his
-        // guards roam from there; no waves.
-        private const string WedgeZone = "BotZoneFloor2";
-        private const string GuardEscorts = "4,4,5,5"; // Wedge + 4-5 guards
-
         private const double DefaultChance = 25;
 
         private readonly DatabaseService _databaseService;
@@ -434,9 +110,8 @@ namespace BlackoutServer
         // the default so the first read has something to fall back to
         private double _chance = DefaultChance;
 
-        // the server owns the coin flip: the Wedge is a server-side spawn baked into the location
-        // before the client is even in the raid, so the roll has to live here. the client reads the
-        // result off /blackout/state so the darkness and the boss agree on the same flip
+        // the server owns the coin flip so every client in the raid agrees on it - they read the
+        // result off /blackout/state
         public bool CurrentRaidBlackout { get; private set; }
 
         // and the emergency code with it. the client used to roll its own, which is fine for one player
@@ -484,20 +159,9 @@ namespace BlackoutServer
             return _chance;
         }
 
-        public int Inject()
+        // Rolls this raid. Nothing is injected into the location any more - the roll is the whole job.
+        public void Roll()
         {
-            var labs = _databaseService.GetLocations().Laboratory;
-            if (labs?.Base?.BossLocationSpawn == null)
-            {
-                _logger.Error("[Blackout] Labs location unavailable - Black Division not injected.");
-                return 0;
-            }
-
-            var spawns = labs.Base.BossLocationSpawn.ToList();
-            // identified by boss type - the base Labs map only spawns pmcBot as bosses, so removing the
-            // Wedge is safe and makes re-injection idempotent
-            spawns.RemoveAll(s => s.BossName == BlackoutBots.WedgeName);
-
             // pick up a config edit made since the last raid. Only says anything when the number
             // actually moved, so a normal raid stays quiet but your edit confirms itself
             var chance = LoadChance();
@@ -507,45 +171,88 @@ namespace BlackoutServer
                 _chance = chance;
             }
 
-            // roll for this raid. a failed roll leaves Labs completely vanilla - no Wedge here, and the
-            // client reads the same result and skips the darkness, lockdown, keypads and the locked door
+            // a failed roll leaves Labs completely vanilla - the client reads the same result and skips
+            // the darkness, lockdown, keypads and the locked door
             CurrentRaidBlackout = _randomUtil.GetChance100(_chance);
             // one code per raid, rolled here so every client in it reads the same four digits
             CurrentRaidCode = _randomUtil.GetInt(0, 9999).ToString("D4");
-            if (!CurrentRaidBlackout)
+
+            PlaceArsenalKey(CurrentRaidBlackout);
+
+            // no raid code in the log on purpose - the whiteboard is where you're meant to find it
+            _logger.Info(CurrentRaidBlackout
+                ? "[Blackout] Roll: BLACKOUT this raid."
+                : "[Blackout] Roll: normal Labs this raid.");
+        }
+
+        // The arsenal key sits on the boss's desk in the manager's office, which is itself behind the
+        // vanilla manager's office key - so the arsenal is two keys deep rather than a free grab.
+        // Forced, not loot-table odds: the key gates the whole event payoff, and a blackout raid where
+        // it happened not to roll is a dead end.
+        private const string ArsenalKeyTpl = "6a33c17933cff6b88c08902e";
+        private const string ArsenalKeySpawnId = "blackout_arsenal_key";
+        // read off Lab_recreation_bosstable_COLLIDER, lifted 2cm so it rests on the desk not in it
+        private static readonly (double X, double Y, double Z) DeskPoint = (-162.978, 4.958, -347.554);
+
+        private void PlaceArsenalKey(bool blackout)
+        {
+            var labs = _databaseService.GetLocations().Laboratory;
+            if (labs?.LooseLoot == null)
             {
-                labs.Base.BossLocationSpawn = spawns;
-                _logger.Info("[Blackout] Roll: normal Labs - no Wedge, no darkness this raid.");
-                return 0;
+                _logger.Error("[Blackout] Labs loose loot unavailable - arsenal key not placed.");
+                return;
             }
 
-            // the Wedge leading 4-5 guards on one open floor at raid start, no waves
-            spawns.Add(new BossLocationSpawn
+            labs.LooseLoot.AddTransformer(loot =>
             {
-                BossName = BlackoutBots.WedgeName,
-                BossChance = 100,
-                BossDifficulty = "normal",
-                BossEscortType = BlackoutBots.GuardName,
-                BossEscortAmount = GuardEscorts,
-                BossEscortDifficulty = "normal",
-                BossZone = WedgeZone,
-                Time = -1,
-                IsBossPlayer = false,
-                IsRandomTimeSpawn = false,
-                Delay = 0,
-                ForceSpawn = false,
-                IgnoreMaxBots = true,
-                SpawnMode = ["regular", "pve"],
-            });
+                if (loot == null)
+                {
+                    return loot;
+                }
 
-            labs.Base.BossLocationSpawn = spawns;
-            // no raid code here on purpose - the whiteboard is where you're meant to find it
-            _logger.Success("[Blackout] Roll: BLACKOUT - Wedge and 4-5 guards hold Labs this raid.");
-            return 1;
+                var forced = loot.SpawnpointsForced?.ToList() ?? new List<Spawnpoint>();
+                // drop any previous copy first so re-rolling between raids can't stack duplicates
+                forced.RemoveAll(s => s.Template?.Id == ArsenalKeySpawnId);
+
+                if (blackout)
+                {
+                    var itemId = new MongoId();
+                    forced.Add(new Spawnpoint
+                    {
+                        LocationId = $"({DeskPoint.X}, {DeskPoint.Y}, {DeskPoint.Z})",
+                        Probability = 1,
+                        Template = new SpawnpointTemplate
+                        {
+                            Id = ArsenalKeySpawnId,
+                            IsContainer = false,
+                            UseGravity = false,
+                            RandomRotation = false,
+                            Position = new XYZ { X = DeskPoint.X, Y = DeskPoint.Y, Z = DeskPoint.Z },
+                            Rotation = new XYZ { X = 0, Y = 0, Z = 0 },
+                            IsGroupPosition = false,
+                            GroupPositions = new List<GroupPosition>(),
+                            IsAlwaysSpawn = true,
+                            Root = itemId.ToString(),
+                            Items = new List<SptLootItem>
+                            {
+                                new SptLootItem
+                                {
+                                    Id = itemId,
+                                    Template = new MongoId(ArsenalKeyTpl),
+                                    Upd = new Upd { StackObjectsCount = 1 },
+                                },
+                            },
+                        },
+                    });
+                }
+
+                loot.SpawnpointsForced = forced;
+                return loot;
+            });
         }
     }
 
-    [Injectable(TypePriority = MoreBotsServer.MoreBotsLoadOrder.LoadBots + 2)]
+    [Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 5)]
     public class BlackoutSpawns : IOnLoad
     {
         private readonly BlackoutSpawnController _controller;
@@ -561,11 +268,11 @@ namespace BlackoutServer
         {
             try
             {
-                _controller.Inject();
+                _controller.Roll();
             }
             catch (Exception ex)
             {
-                _logger.Error($"[Blackout] Spawn injection failed: {ex}");
+                _logger.Error($"[Blackout] Raid roll failed: {ex}");
             }
             return Task.CompletedTask;
         }
@@ -590,7 +297,7 @@ namespace BlackoutServer
                 new RouteAction("/client/match/local/end",
                     async (url, info, sessionID, output) =>
                     {
-                        _controller.Inject();
+                        _controller.Roll();
                         return await new ValueTask<object>(output ?? string.Empty);
                     }, null),
             };
@@ -598,7 +305,7 @@ namespace BlackoutServer
     }
 
     // Tells the client whether THIS raid rolled a blackout, so the darkness, the extract lockdown, the
-    // keypads and the locked arsenal door all ride the same flip as the Wedge instead of rolling apart.
+    // keypads and the locked arsenal door all ride the same flip instead of rolling apart.
     [Injectable]
     public class BlackoutStateRouter : StaticRouter
     {
