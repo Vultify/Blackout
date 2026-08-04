@@ -115,6 +115,67 @@ namespace Blackout
         private Texture2D _subtitleFrame;
         private GUIStyle _subtitleStyle;
         private bool _errorLogged;
+        private bool _bridgeErrorLogged;
+
+        // What each expensive pass actually costs. Here so an optimisation can be proved instead of
+        // assumed - every one of these is a whole-scene or whole-heap walk and we have never measured
+        // one. Logs the first call of each pass (the hitch you feel) and a total on raid end.
+        private class Prof
+        {
+            private readonly string _name;
+            private bool _firstLogged;
+            public double TotalMs;
+            public int Calls;
+
+            public Prof(string name)
+            {
+                _name = name;
+            }
+
+            public void Add(double ms, BepInEx.Logging.ManualLogSource log)
+            {
+                TotalMs += ms;
+                Calls++;
+                if (!_firstLogged)
+                {
+                    _firstLogged = true;
+                    log.LogInfo($"[Blackout] perf: {_name} first pass {ms:0.0}ms");
+                }
+            }
+
+            public void Reset()
+            {
+                TotalMs = 0;
+                Calls = 0;
+                _firstLogged = false;
+            }
+        }
+
+        private readonly Prof _profLightScene = new Prof("light scene disable");
+        private readonly Prof _profSpecular = new Prof("specular sweep");
+        private readonly Prof _profEmissive = new Prof("emissive material sweep");
+        private readonly Prof _profLightScan = new Prof("light scan");
+        private readonly Prof _profLampScan = new Prof("lamp scan");
+
+        private void LogPerfSummary()
+        {
+            if (_profLightScene.Calls == 0 && _profEmissive.Calls == 0
+                && _profLightScan.Calls == 0 && _profLampScan.Calls == 0)
+            {
+                return;
+            }
+            Logger.LogInfo(
+                $"[Blackout] perf totals: light scene {_profLightScene.TotalMs:0}ms x{_profLightScene.Calls}, "
+                + $"specular {_profSpecular.TotalMs:0}ms x{_profSpecular.Calls}, "
+                + $"emissive {_profEmissive.TotalMs:0}ms x{_profEmissive.Calls}, "
+                + $"light scan {_profLightScan.TotalMs:0}ms x{_profLightScan.Calls}, "
+                + $"lamp scan {_profLampScan.TotalMs:0}ms x{_profLampScan.Calls}");
+            _profLightScene.Reset();
+            _profSpecular.Reset();
+            _profEmissive.Reset();
+            _profLightScan.Reset();
+            _profLampScan.Reset();
+        }
 
         private readonly List<LightState> _killedLights = new List<LightState>();
         private readonly HashSet<Light> _trackedLights = new HashSet<Light>();
@@ -150,6 +211,24 @@ namespace Blackout
         }
 
         private readonly Dictionary<Material, EmissiveState> _dimmedEmissives = new Dictionary<Material, EmissiveState>();
+
+        // Killing emission leaves the map's plain specular surfaces glinting into the distance -
+        // out there the flashlight has fallen off and specular is the only thing still catching
+        // light, which is why distance reads as dark-but-legible instead of void. The map's most
+        // common shader ('p0/Reflective/Bumped Specular SMap') carries no emission at all, so the
+        // emissive pass skips it entirely by name.
+        //
+        // Scoped by scene rather than the emissive pass's Resources.FindObjectsOfTypeAll, because
+        // specular belongs to weapons, gear and hands too and dimming those would be wrong.
+        private static readonly int SpecValsProp = Shader.PropertyToID("_SpecVals");
+        private const float SpecularKeep = 0.4f;
+        private static readonly HashSet<string> SpecularSkipScenes = new HashSet<string>
+        {
+            "Laboratory_AI", "Laboratory_Sound", "Laboratory_Culling", "GameUIScene",
+        };
+        private readonly Dictionary<Material, Vector4> _dimmedSpecular = new Dictionary<Material, Vector4>();
+        private readonly List<Renderer> _specRenderers = new List<Renderer>(8300);
+        private readonly List<Material> _specMaterials = new List<Material>(20);
         private bool _lampScanRetired;
         private AudioMixerGroup _ambientMixerGroup;
         private bool _ambientMixerResolved;
@@ -237,6 +316,76 @@ namespace Blackout
             catch (Exception ex)
             {
                 Logger.LogError($"[Blackout] keypad patch failed, keycard doors stay vanilla: {ex.Message}");
+            }
+
+            TryLoadFikaBridge();
+        }
+
+        // Co-op support ships as BlackoutFika.dll beside this one, deliberately WITHOUT a
+        // [BepInPlugin] attribute - so BepInEx scans it, finds no plugin type, and skips it without
+        // ever resolving Fika.Core. That is what lets one download serve both audiences: solo
+        // players never touch the file, and nobody gets "1 plugin failed to load" for a Fika
+        // dependency they don't have. We load it by hand here instead, only once Fika is confirmed.
+        private const string FikaPluginGuid = "com.fika.core";
+        private const string FikaBridgeFile = "BlackoutFika.dll";
+        private const string FikaBridgeType = "BlackoutFika.BlackoutFikaBridge";
+        private MethodInfo _fikaBridgeShutdown;
+
+        private void TryLoadFikaBridge()
+        {
+            if (!BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey(FikaPluginGuid))
+            {
+                return;
+            }
+
+            var dir = Path.GetDirectoryName(Info.Location);
+            var path = dir == null ? null : Path.Combine(dir, FikaBridgeFile);
+            if (path == null || !File.Exists(path))
+            {
+                Logger.LogWarning($"[Blackout] Fika is installed but {FikaBridgeFile} is missing from the plugin folder - this raid and every other runs UNSYNCED");
+                return;
+            }
+
+            try
+            {
+                var type = Assembly.LoadFrom(path).GetType(FikaBridgeType, true);
+                var init = type.GetMethod("Initialize", BindingFlags.Public | BindingFlags.Static);
+                _fikaBridgeShutdown = type.GetMethod("Shutdown", BindingFlags.Public | BindingFlags.Static);
+                if (init == null || _fikaBridgeShutdown == null)
+                {
+                    throw new MissingMethodException(FikaBridgeType, "Initialize/Shutdown");
+                }
+                init.Invoke(null, new object[] { Logger });
+                Logger.LogInfo("[Blackout] Fika detected, co-op bridge loaded");
+            }
+            catch (Exception ex)
+            {
+                // unwrap it, or every bridge-side failure reports as "Exception has been thrown by
+                // the target of an invocation" with the real cause buried one level down
+                var cause = (ex as TargetInvocationException)?.InnerException ?? ex;
+                _fikaBridgeShutdown = null;
+                Logger.LogError($"[Blackout] Fika bridge failed to load, co-op runs UNSYNCED: {cause.Message}");
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_fikaBridgeShutdown == null)
+            {
+                return;
+            }
+            try
+            {
+                _fikaBridgeShutdown.Invoke(null, null);
+            }
+            catch (Exception ex)
+            {
+                var cause = (ex as TargetInvocationException)?.InnerException ?? ex;
+                Logger.LogWarning($"[Blackout] Fika bridge shutdown failed: {cause.Message}");
+            }
+            finally
+            {
+                _fikaBridgeShutdown = null;
             }
         }
 
@@ -602,6 +751,21 @@ namespace Blackout
                     Logger.LogError($"[Blackout] {ex}");
                 }
             }
+
+            // the fika bridge has no MonoBehaviour of its own and borrows this Update. Its own
+            // try/catch, so a networking fault can't silence the plugin's error reporting or vice versa
+            try
+            {
+                BlackoutSync.Tick?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                if (!_bridgeErrorLogged)
+                {
+                    _bridgeErrorLogged = true;
+                    Logger.LogError($"[Blackout] fika bridge tick failed: {ex}");
+                }
+            }
         }
 
         // one call per raid, on the frame we first see Labs. failures fall back to no event
@@ -703,7 +867,9 @@ namespace Blackout
                     _reportedRelights.Clear();
                     // materials are assets that outlive the raid - un-dim them or the next
                     // raid (any map) inherits dead lamps
+                    LogPerfSummary();
                     RestoreEmissiveMaterials();
+                    RestoreSpecular();
                     RestoreAmbient();
                     DestroyEmergencyLights();
                     _originalLightmaps = null;
@@ -912,11 +1078,16 @@ namespace Blackout
             _stableLightScans = 0;
             _isLabs = Singleton<GameWorld>.Instance?.LocationId == LabsLocationId;
 
+            var swLightScene = System.Diagnostics.Stopwatch.StartNew();
             DisableLightScene();
+            _profLightScene.Add(swLightScene.Elapsed.TotalMilliseconds, Logger);
+            var swSpecular = System.Diagnostics.Stopwatch.StartNew();
+            DimSpecular();
+            _profSpecular.Add(swSpecular.Elapsed.TotalMilliseconds, Logger);
             SpawnEmergencyLights();
             EnforceBlackout();
             PlayPowerDownSound();
-            Logger.LogInfo($"[Blackout] Power cut: {_killedLights.Count} lights killed, {_switchedLamps.Count} lamp fixtures switched off, {_dimmedEmissives.Count} emissive materials dimmed");
+            Logger.LogInfo($"[Blackout] Power cut: {_killedLights.Count} lights killed, {_switchedLamps.Count} lamp fixtures switched off, {_dimmedEmissives.Count} emissive materials dimmed, {_dimmedSpecular.Count} specular materials dimmed");
         }
 
         private struct EmergencyLight
@@ -1182,6 +1353,7 @@ namespace Blackout
                 _nextRescan = Time.time + RescanIntervalSec;
                 if (_stableLightScans < 6)
                 {
+                    var swLightScan = System.Diagnostics.Stopwatch.StartNew();
                     var lightsBefore = _killedLights.Count;
                     foreach (var light in FindObjectsOfType<Light>())
                     {
@@ -1224,6 +1396,7 @@ namespace Blackout
                         }
                         _killedLights.Add(new LightState { Light = light, Intensity = light.intensity });
                     }
+                    _profLightScan.Add(swLightScan.Elapsed.TotalMilliseconds, Logger);
                     _stableLightScans = _killedLights.Count == lightsBefore ? _stableLightScans + 1 : 0;
                     if (_stableLightScans == 6)
                     {
@@ -1236,6 +1409,7 @@ namespace Blackout
                 // keep appearing over a raid)
                 if (_stableSweeps < 3)
                 {
+                    var swLampScan = System.Diagnostics.Stopwatch.StartNew();
                     var lampsBefore = _trackedLamps.Count;
                     var emissivesBefore = _dimmedEmissives.Count;
                     var scannedLamps = false;
@@ -1272,12 +1446,16 @@ namespace Blackout
                         }
                     }
 
+                    _profLampScan.Add(swLampScan.Elapsed.TotalMilliseconds, Logger);
+
                     if (!_lampScanRetired && !scannedLamps && _trackedLamps.Count == 0)
                     {
                         _lampScanRetired = true;
                         Logger.LogInfo("[Blackout] No lamp fixtures on this map, lamp sweep retired");
                     }
+                    var swEmissive = System.Diagnostics.Stopwatch.StartNew();
                     DimEmissiveMaterials();
+                    _profEmissive.Add(swEmissive.Elapsed.TotalMilliseconds, Logger);
 
                     _stableSweeps = _trackedLamps.Count == lampsBefore && _dimmedEmissives.Count == emissivesBefore
                         ? _stableSweeps + 1
@@ -1398,6 +1576,61 @@ namespace Blackout
                 }
             }
             _dimmedEmissives.Clear();
+        }
+
+        // One pass at the cut - the map's static geometry doesn't gain new surfaces mid-raid, and
+        // unlike the light sweep there is nothing here for the game to re-assert.
+        private void DimSpecular()
+        {
+            for (var i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
+            {
+                var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+                if (!scene.isLoaded || SpecularSkipScenes.Contains(scene.name)
+                    || scene.name.StartsWith("PhysicsWorld_", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                foreach (var root in scene.GetRootGameObjects())
+                {
+                    root.GetComponentsInChildren(true, _specRenderers);
+                    foreach (var rend in _specRenderers)
+                    {
+                        if (rend == null)
+                        {
+                            continue;
+                        }
+                        rend.GetSharedMaterials(_specMaterials);
+                        foreach (var mat in _specMaterials)
+                        {
+                            // shared materials repeat across renderers - scaling one twice
+                            // compounds it down to 0.16 and the surface goes flat black
+                            if (mat == null || _dimmedSpecular.ContainsKey(mat)
+                                || !mat.HasProperty(SpecValsProp))
+                            {
+                                continue;
+                            }
+                            var spec = mat.GetVector(SpecValsProp);
+                            _dimmedSpecular[mat] = spec;
+                            mat.SetVector(SpecValsProp, spec * SpecularKeep);
+                        }
+                        _specMaterials.Clear();
+                    }
+                    _specRenderers.Clear();
+                }
+            }
+        }
+
+        private void RestoreSpecular()
+        {
+            foreach (var pair in _dimmedSpecular)
+            {
+                if (pair.Key != null)
+                {
+                    pair.Key.SetVector(SpecValsProp, pair.Value);
+                }
+            }
+            _dimmedSpecular.Clear();
         }
 
         private static bool IsGearLight(Light light)
@@ -2181,6 +2414,10 @@ namespace Blackout
         public static Action CutHappened;
         public static Action SwitchFlipped;
         public static Action<string> DoorUnlocked;
+
+        // us -> bridge: once a frame. The bridge is a plain library with no MonoBehaviour of its
+        // own, so it borrows our Update to retry packet registration until Fika's net manager exists
+        public static Action Tick;
 
         // bridge -> us: someone else did it, apply it locally. Assigned by the plugin on Awake.
         // doors arrive as a hash rather than a name - see HashId
