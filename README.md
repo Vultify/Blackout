@@ -30,20 +30,22 @@ The percent chance any given Labs raid goes dark. Set it to 100 to get the event
 
 Fika raids stay in step. The server rolls one emergency code for the raid so everyone reads the same digits off the whiteboard, and the three things that can otherwise drift apart all travel between players - the lights cut for the whole group at once, whoever pulls the admin switch opens the gates for everyone, and a keycard door one player opens with the code is open for the rest.
 
-This lives in a **separate Blackout Fika addon** on the Forge rather than in the main download, so a solo install never has the file at all. Grab it only if you run Fika - it needs Blackout 2.1.0 or newer, there is nothing to configure, and playing alone is unchanged either way.
+The bridge that does this ships **inside this download** as of 3.1.0, in `BepInEx/plugins/Blackout/`. It is not a plugin in its own right - Blackout loads it itself, and only once it sees Fika installed - so a solo install ignores the file entirely and there is nothing to configure either way.
+
+There used to be a separate **Blackout Fika** addon. It is discontinued. If you installed it, delete `BepInEx/plugins/BlackoutFika/` - left in place it loads a second copy of the bridge alongside this one.
 
 ## Requirements
 
 - SPT 4.0.x
 - WTT-CommonLib **2.0.22 or newer** - both halves (WTT-ServerCommonLib and WTT-ClientCommonLib)
 - WTT's Black Division mod optional - it brings the Wedge, which this mod no longer does
-- Fika optional - with it plus the Blackout Fika addon, co-op raids sync themselves, see [Co-op](#co-op)
+- Fika optional - co-op raids sync themselves with no extra download, see [Co-op](#co-op)
 
 ## Structure
 
 - `Blackout/` - client BepInEx plugin (darkness, sounds, door locks, keypad)
-- `BlackoutServer/` - server mod (the raid roll and the arsenal key)
-- `BlackoutFika/` - the co-op bridge, published as its own Forge addon rather than shipped here
+- `BlackoutServer/` - server mod (the raid roll and the Admin's Key)
+- `BlackoutFika/` - the co-op bridge, shipped alongside the client plugin
 - `blackout_sounds.bundle` - the live event's audio, extracted and repacked
 
 See [CHANGELOG.md](CHANGELOG.md) for the full build log.
