@@ -9,9 +9,9 @@
     },
     "locales": {
       "en": {
-        "name": "TerraGroup Labs arsenal storage room key",
-        "shortName": "TGL ASR",
-        "description": "Key to the TerraGroup Labs Security arsenal storage room."
+        "name": "Admin's Key",
+        "shortName": "Admin",
+        "description": "A mechanical key that unlocks either a utility room or one of the system administrators' offices."
       }
     },
     "fleaPriceRoubles": 157434,

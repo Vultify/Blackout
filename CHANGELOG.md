@@ -3,8 +3,11 @@
 All notable changes to Blackout are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+## [3.1.0] - 2026-08-03
 ### Changed
-- **The Fika addon is now part of this download.** `BlackoutFika.dll` sits in `BepInEx/plugins/Blackout/` and Blackout loads it itself once it sees Fika installed. It is not a plugin in its own right, so a solo install ignores the file completely: no second download to find, and no "1 plugin failed to load" notice for anyone playing without Fika. If you have the separate Blackout Fika addon installed, delete its `BepInEx/plugins/BlackoutFika/` folder.
+- **The Fika addon is now part of this download.** `BlackoutFika.dll` sits in `BepInEx/plugins/Blackout/` and Blackout loads it itself once it sees Fika installed. It is not a plugin in its own right, so a solo install ignores the file completely: no second download to find, and no "1 plugin failed to load" notice for anyone playing without Fika. **If you have the separate Blackout Fika addon installed, delete its `BepInEx/plugins/BlackoutFika/` folder** - left in place it loads a second copy of the bridge alongside this one.
+- The event key is now the **Admin's Key** (short name "Admin"), which is what it should have been called all along. Same key, same item, same single use - only the name and description changed, so anything already sitting in your stash is unaffected.
 - The darkening pass now cuts specular on the map's surfaces as well as their emission. Labs' most common shader carries no emission at all, so it was skipped entirely, and its surfaces kept catching light out at distance where a flashlight no longer reaches.
 
 ## [3.0.0] - 2026-08-02

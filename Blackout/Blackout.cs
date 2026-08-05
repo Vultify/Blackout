@@ -11,7 +11,7 @@ using UnityEngine.Audio;
 
 namespace Blackout
 {
-    [BepInPlugin("com.vultify.blackout", "Blackout", "3.0.0")]
+    [BepInPlugin("com.vultify.blackout", "Blackout", "3.1.0")]
     // the client half of WTT-CommonLib must be present or the Admin key resolves to nothing
     // client-side. hard-depend so a missing half errors clearly
     [BepInDependency("com.wtt.commonlib", "2.0.22")]

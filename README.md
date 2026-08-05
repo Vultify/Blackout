@@ -12,7 +12,7 @@ Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the gene
 
 ## The arsenal
 
-The **TerraGroup Labs arsenal storage room key** spawns on the boss's desk in the manager's office on a blackout raid - single use, opens the arsenal, and the door can't be breached. The manager's office is itself locked, so it's the manager's office key first, then the arsenal.
+The **Admin's Key** spawns on the boss's desk in the manager's office on a blackout raid - single use, opens the arsenal, and the door can't be breached. The manager's office is itself locked, so it's the manager's office key first, then the arsenal.
 
 The Wedge and his Black Division guards used to be part of this mod. They aren't any more - WTT's **Black Division** mod adds the Wedge itself now, so keeping our own meant two of him. Run that alongside Blackout if you want him holding the floors.
 
