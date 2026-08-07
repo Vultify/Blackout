@@ -11,7 +11,7 @@ using UnityEngine.Audio;
 
 namespace Blackout
 {
-    [BepInPlugin("com.vultify.blackout", "Blackout", "3.1.0")]
+    [BepInPlugin("com.vultify.blackout", "Blackout", "3.1.1")]
     // the client half of WTT-CommonLib must be present or the Admin key resolves to nothing
     // client-side. hard-depend so a missing half errors clearly
     [BepInDependency("com.wtt.commonlib", "2.0.22")]
@@ -928,8 +928,17 @@ namespace Blackout
             {
                 // in a co-op raid the host owns this moment. Everyone else sits here doing nothing
                 // until the cut packet lands, otherwise each player goes dark whenever they happened
-                // to move, which is the single most obvious desync in the whole event
-                if (BlackoutSync.Active && !BlackoutSync.IsHost)
+                // to move, which is the single most obvious desync in the whole event.
+                //
+                // Unless the host is headless. Fika elects it host and it has no player of its own,
+                // so it can never satisfy the movement gate below - which left every client waiting
+                // on a cut that could not come, and the raid silently played as normal Labs
+                // (confirmed from a reporter's headless + client logs, 2026-08-06). There, clients
+                // run their own clock and whoever gets there first sends the cut; the headless
+                // relays it to the rest, which the bridge already does unconditionally. Everyone
+                // still goes dark together, and a second client arriving late is a no-op because
+                // ApplyCut returns once _blackoutActive is set.
+                if (BlackoutSync.Active && !BlackoutSync.IsHost && !BlackoutSync.HeadlessHost)
                 {
                     return;
                 }
@@ -2409,6 +2418,10 @@ namespace Blackout
         public static bool Active;
         // the host owns the moment the lights go out; everyone else waits to be told
         public static bool IsHost = true;
+        // ...except a headless host, which has no player of its own and so can never reach its own
+        // cut moment. Clients read this off Fika - it comes from the host query when they connect -
+        // and fall back to running the clock themselves
+        public static bool HeadlessHost;
 
         // us -> bridge: something happened here that the rest of the raid needs
         public static Action CutHappened;
@@ -2449,6 +2462,7 @@ namespace Blackout
         {
             Active = false;
             IsHost = true;
+            HeadlessHost = false;
         }
     }
 }

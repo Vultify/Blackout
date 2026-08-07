@@ -96,7 +96,11 @@ namespace BlackoutFika
         {
             BlackoutSync.Active = true;
             BlackoutSync.IsHost = FikaBackendUtils.IsServer;
-            _log?.LogInfo($"[BlackoutFika] raid started, this client is {(BlackoutSync.IsHost ? "HOST" : "CLIENT")}");
+            // IsHeadlessGame is set from the host query when a client connects, so clients know;
+            // IsHeadless covers the headless itself. Either way the host has no player and can
+            // never reach its own cut moment, so clients stop waiting on it
+            BlackoutSync.HeadlessHost = FikaBackendUtils.IsHeadlessGame || FikaBackendUtils.IsHeadless;
+            _log?.LogInfo($"[BlackoutFika] raid started, this client is {(BlackoutSync.IsHost ? "HOST" : "CLIENT")}, headless host: {BlackoutSync.HeadlessHost}");
             RegisterPackets();
         }
 

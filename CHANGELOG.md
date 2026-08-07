@@ -4,6 +4,10 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-08-06
+### Fixed
+- **A Fika raid hosted by a headless client never went dark.** Fika elects the headless as host, and Blackout gave the host ownership of the moment the lights cut - but that moment is triggered by the host player moving, and a headless has no player. Every client sat waiting for a cut packet that could not come, so the raid ran as normal Labs. Everything else worked, which is why it looked like only the darkness was broken. On a headless-hosted raid the clients now run that clock themselves and the first one there sends the cut, which the headless relays to the rest - so the lights still go out for everyone at once. Player-hosted raids are unchanged.
+
 ## [3.1.0] - 2026-08-03
 ### Changed
 - **The Fika addon is now part of this download.** `BlackoutFika.dll` sits in `BepInEx/plugins/Blackout/` and Blackout loads it itself once it sees Fika installed. It is not a plugin in its own right, so a solo install ignores the file completely: no second download to find, and no "1 plugin failed to load" notice for anyone playing without Fika. **If you have the separate Blackout Fika addon installed, delete its `BepInEx/plugins/BlackoutFika/` folder** - left in place it loads a second copy of the bridge alongside this one.
