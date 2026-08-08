@@ -1,33 +1,35 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>BlackoutServer</AssemblyName>
     <RootNamespace>BlackoutServer</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>3.1.1</Version>
+    <LangVersion>latest</LangVersion>
+    <Version>4.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- SPT 4.1 moved the server runtime out of SPT\ into SPT_Runtime\ -->
     <Reference Include="SPTarkov.DI">
-      <HintPath>$(SPT_PATH)\SPT\SPTarkov.DI.dll</HintPath>
+      <HintPath>$(SPT_PATH)\SPT_Runtime\SPTarkov.DI.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="SPTarkov.Server.Core">
-      <HintPath>$(SPT_PATH)\SPT\SPTarkov.Server.Core.dll</HintPath>
+      <HintPath>$(SPT_PATH)\SPT_Runtime\SPTarkov.Server.Core.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="SPTarkov.Common">
-      <HintPath>$(SPT_PATH)\SPT\SPTarkov.Common.dll</HintPath>
+      <HintPath>$(SPT_PATH)\SPT_Runtime\SPTarkov.Common.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="SemanticVersioning">
-      <HintPath>$(SPT_PATH)\SPT\SemanticVersioning.dll</HintPath>
+      <HintPath>$(SPT_PATH)\SPT_Runtime\SemanticVersioning.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="WTT-ServerCommonLib">
-      <HintPath>$(SPT_PATH)\SPT\user\mods\WTT-ServerCommonLib\WTT-ServerCommonLib.dll</HintPath>
+      <HintPath>$(SPT_PATH)\SPT_Runtime\user\mods\WTT-ServerCommonLib\WTT-ServerCommonLib.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

@@ -4,6 +4,11 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-08-08
+### Changed
+- **Ported to SPT 4.1.** This version needs SPT **4.1.x** and will not run on 4.0.13 - stay on 3.1.1 for that. Nothing about the event changed; it is the same mod against a moved API.
+- Requires WTT-CommonLib **3.0.0 or newer** (the 4.1 line). The 2.0.x releases are for SPT 4.0 and will not work here.
+
 ## [3.1.1] - 2026-08-06
 ### Fixed
 - **A Fika raid hosted by a headless client never went dark.** Fika elects the headless as host, and Blackout gave the host ownership of the moment the lights cut - but that moment is triggered by the host player moving, and a headless has no player. Every client sat waiting for a cut packet that could not come, so the raid ran as normal Labs. Everything else worked, which is why it looked like only the darkness was broken. On a headless-hosted raid the clients now run that clock themselves and the first one there sends the cut, which the headless relays to the rest - so the lights still go out for everyone at once. Player-hosted raids are unchanged.

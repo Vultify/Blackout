@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Threading;
+using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Models.Common;
@@ -6,68 +8,70 @@ using SPTarkov.Server.Core.Models.Eft.Common;
 using SPTarkov.Server.Core.Models.Eft.Common.Tables;
 using SPTarkov.Server.Core.Models.Spt.Config;
 using SPTarkov.Server.Core.Models.Spt.Mod;
-using SPTarkov.Server.Core.Models.Utils;
+using SPTarkov.Server.Core.Models.Spt.Tables;
 using SPTarkov.Server.Core.Servers;
-using SPTarkov.Server.Core.Services;
-using SPTarkov.Server.Core.Services.Mod;
+using SPTarkov.Server.Core.Services.Modding.Custom;
 using SPTarkov.Server.Core.Utils;
 using SPTarkov.Server.Core.Utils.Json;
 
 namespace BlackoutServer
 {
-    public record BlackoutServerMetadata : AbstractModMetadata
+    // 4.1 replaced the AbstractModMetadata record with the IModMetadata interface: plain properties
+    // instead of overrides, IsBundleMod dropped for HasPrepatcher, and the collections nullable
+    public record BlackoutServerMetadata : IModMetadata
     {
-        public override string ModGuid { get; init; } = "com.vultify.blackout";
-        public override string Name { get; init; } = "Blackout";
-        public override string Author { get; init; } = "Vultify";
-        public override string License { get; init; } = "MIT";
-        public override string Url { get; init; } = "";
-        public override bool? IsBundleMod { get; init; } = false;
+        public string ModGuid { get; init; } = "com.vultify.blackout";
+        public string Name { get; init; } = "Blackout";
+        public string Author { get; init; } = "Vultify";
+        public string License { get; init; } = "MIT";
+        public string? Url { get; init; } = "";
 
-        public override SemanticVersioning.Version Version { get; init; }
-            = new SemanticVersioning.Version("3.1.1", false);
+        public bool HasPrepatcher { get; init; } = false;
 
-        public override SemanticVersioning.Range SptVersion { get; init; }
-            = new SemanticVersioning.Range("~4.0.13", false);
+        public SemanticVersioning.Version Version { get; init; }
+            = new SemanticVersioning.Version("4.0.0", false);
 
-        public override List<string> Contributors { get; init; } = new();
-        public override List<string> Incompatibilities { get; init; } = new();
-        public override Dictionary<string, SemanticVersioning.Range> ModDependencies { get; init; } = new()
+        public SemanticVersioning.Range SptVersion { get; init; }
+            = new SemanticVersioning.Range("~4.1.0", false);
+
+        public List<string>? Contributors { get; init; } = new();
+        public List<string>? Incompatibilities { get; init; } = new();
+        public Dictionary<string, SemanticVersioning.Range>? ModDependencies { get; init; } = new()
         {
             // creates the Admin's key. the only dependency left now the Black Division is gone
-            { "com.wtt.commonlib", new SemanticVersioning.Range(">=2.0.22") },
+            { "com.wtt.commonlib", new SemanticVersioning.Range(">=3.0.0") },
         };
     }
 
     // The event's Admin's key (db/CustomItems/blackout_key.json), created through WTT-CommonLib.
     // The only item the mod adds. Runs post-DB so the clone donor already exists.
-    [Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 4)]
+    [Injectable(TypePriority = OnLoadOrder.PostLoad + 4)]
     public class BlackoutCustomItems : IOnLoad
     {
         // the live event's Admin's key, real 1.0.6.5 item id - opens the system admin office
         private const string AdminKey = "6a33c17933cff6b88c08902e";
 
         private readonly WTTServerCommonLib.WTTServerCommonLib _commonLib;
-        private readonly DatabaseService _databaseService;
+        private readonly TemplateTable _templates;
         private readonly ISptLogger<BlackoutCustomItems> _logger;
 
         public BlackoutCustomItems(
             WTTServerCommonLib.WTTServerCommonLib commonLib,
-            DatabaseService databaseService,
+            TemplateTable templates,
             ISptLogger<BlackoutCustomItems> logger)
         {
             _commonLib = commonLib;
-            _databaseService = databaseService;
+            _templates = templates;
             _logger = logger;
         }
 
-        public async Task OnLoad()
+        public async Task OnLoadAsync(CancellationToken cancellationToken)
         {
             try
             {
                 await _commonLib.CustomItemServiceExtended.CreateCustomItems(Assembly.GetExecutingAssembly());
 
-                var items = _databaseService.GetItems();
+                var items = _templates.Items;
 
                 // the Admin's key is the only item Blackout adds
                 var made = items.ContainsKey(new MongoId(AdminKey)) ? 1 : 0;
@@ -77,9 +81,9 @@ namespace BlackoutServer
                 var keyUses = adminKey?.Properties?.MaximumNumberOfUsage;
                 var keySellable = adminKey?.Properties?.CanSellOnRagfair;
                 // prices live outside the item template, so check the tables they actually land in
-                var keyHandbook = _databaseService.GetHandbook().Items?
+                var keyHandbook = _templates.Handbook.Items?
                     .FirstOrDefault(i => i.Id == new MongoId(AdminKey))?.Price;
-                _databaseService.GetPrices().TryGetValue(new MongoId(AdminKey), out var keyFlea);
+                _templates.Prices.TryGetValue(new MongoId(AdminKey), out var keyFlea);
 
                 if (made != 1 || keyUses != 1 || keySellable != true
                     || keyHandbook != 100000 || keyFlea != 157434)
@@ -102,7 +106,7 @@ namespace BlackoutServer
     {
         private const double DefaultChance = 25;
 
-        private readonly DatabaseService _databaseService;
+        private readonly LocationTable _locations;
         private readonly RandomUtil _randomUtil;
         private readonly ISptLogger<BlackoutSpawnController> _logger;
         // reloaded before every roll, not just at startup, so editing config.json between raids takes
@@ -119,9 +123,9 @@ namespace BlackoutServer
         // whiteboard, and each keypad only accepted the code that client happened to generate
         public string CurrentRaidCode { get; private set; } = "0000";
 
-        public BlackoutSpawnController(DatabaseService databaseService, RandomUtil randomUtil, ISptLogger<BlackoutSpawnController> logger)
+        public BlackoutSpawnController(LocationTable locations, RandomUtil randomUtil, ISptLogger<BlackoutSpawnController> logger)
         {
-            _databaseService = databaseService;
+            _locations = locations;
             _randomUtil = randomUtil;
             _logger = logger;
             _chance = LoadChance();
@@ -196,7 +200,7 @@ namespace BlackoutServer
 
         private void PlaceArsenalKey(bool blackout)
         {
-            var labs = _databaseService.GetLocations().Laboratory;
+            var labs = _locations.Laboratory;
             if (labs?.LooseLoot == null)
             {
                 _logger.Error("[Blackout] Labs loose loot unavailable - arsenal key not placed.");
@@ -227,8 +231,8 @@ namespace BlackoutServer
                             IsContainer = false,
                             UseGravity = false,
                             RandomRotation = false,
-                            Position = new XYZ { X = DeskPoint.X, Y = DeskPoint.Y, Z = DeskPoint.Z },
-                            Rotation = new XYZ { X = 0, Y = 0, Z = 0 },
+                            Position = new Vector3 { X = (float)DeskPoint.X, Y = (float)DeskPoint.Y, Z = (float)DeskPoint.Z },
+                            Rotation = new Vector3 { X = 0, Y = 0, Z = 0 },
                             IsGroupPosition = false,
                             GroupPositions = new List<GroupPosition>(),
                             IsAlwaysSpawn = true,
@@ -252,7 +256,7 @@ namespace BlackoutServer
         }
     }
 
-    [Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 5)]
+    [Injectable(TypePriority = OnLoadOrder.PostLoad + 5)]
     public class BlackoutSpawns : IOnLoad
     {
         private readonly BlackoutSpawnController _controller;
@@ -264,7 +268,7 @@ namespace BlackoutServer
             _logger = logger;
         }
 
-        public Task OnLoad()
+        public Task OnLoadAsync(CancellationToken cancellationToken)
         {
             try
             {
@@ -295,7 +299,7 @@ namespace BlackoutServer
             return new List<RouteAction>
             {
                 new RouteAction("/client/match/local/end",
-                    async (url, info, sessionID, output) =>
+                    async (url, info, sessionID, output, cancellationToken) =>
                     {
                         _controller.Roll();
                         return await new ValueTask<object>(output ?? string.Empty);
@@ -322,7 +326,7 @@ namespace BlackoutServer
             return new List<RouteAction>
             {
                 new RouteAction("/blackout/state",
-                    async (url, info, sessionID, output) =>
+                    async (url, info, sessionID, output, cancellationToken) =>
                         await new ValueTask<object>(
                             "{\"blackout\":" + (_controller.CurrentRaidBlackout ? "true" : "false")
                             + ",\"code\":\"" + _controller.CurrentRaidCode + "\"}"),

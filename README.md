@@ -36,8 +36,8 @@ There used to be a separate **Blackout Fika** addon. It is discontinued. If you 
 
 ## Requirements
 
-- SPT 4.0.x
-- WTT-CommonLib **2.0.22 or newer** - both halves (WTT-ServerCommonLib and WTT-ClientCommonLib)
+- SPT 4.1.x
+- WTT-CommonLib **3.0.0 or newer** (the SPT 4.1 line) - both halves (WTT-ServerCommonLib and WTT-ClientCommonLib)
 - WTT's Black Division mod optional - it brings the Wedge, which this mod no longer does
 - Fika optional - co-op raids sync themselves with no extra download, see [Co-op](#co-op)
 

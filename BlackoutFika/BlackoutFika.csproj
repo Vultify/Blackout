@@ -4,12 +4,16 @@
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>BlackoutFika</AssemblyName>
     <RootNamespace>BlackoutFika</RootNamespace>
-    <Version>3.1.1</Version>
+    <Version>4.0.0</Version>
     <LangVersion>latest</LangVersion>
     <!-- where to find the client's own build. build.bat overrides it, because it builds the client
          with -o bin\Release and the DLL lands flat instead of under the TFM folder. This default is
          what a plain dotnet build produces -->
     <BlackoutDll Condition="'$(BlackoutDll)' == ''">$(MSBuildThisFileDirectory)..\Blackout\bin\Release\net472\Blackout.dll</BlackoutDll>
+    <!-- prefer the install's own copy; fall back to lib\ so the bridge still builds on a machine
+         with no fika installed (lib\ is gitignored - drop Fika.Core.dll from the release zip in it) -->
+    <FikaCore Condition="'$(FikaCore)' == ''">$(SPT_PATH)\BepInEx\plugins\Fika\Fika.Core.dll</FikaCore>
+    <FikaCore Condition="!Exists('$(FikaCore)')">$(MSBuildThisFileDirectory)..\lib\Fika.Core.dll</FikaCore>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,7 +28,7 @@
          definition that the game's System.Memory.dll (a facade) doesn't carry. Both go away here.
          LiteNetLib is merged into Fika.Core, so this one reference covers the packet types too -->
     <Reference Include="Fika.Core">
-      <HintPath>$(SPT_PATH)\BepInEx\plugins\Fika\Fika.Core.dll</HintPath>
+      <HintPath>$(FikaCore)</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="BepInEx">

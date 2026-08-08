@@ -11,10 +11,10 @@ using UnityEngine.Audio;
 
 namespace Blackout
 {
-    [BepInPlugin("com.vultify.blackout", "Blackout", "3.1.1")]
+    [BepInPlugin("com.vultify.blackout", "Blackout", "4.0.0")]
     // the client half of WTT-CommonLib must be present or the Admin key resolves to nothing
     // client-side. hard-depend so a missing half errors clearly
-    [BepInDependency("com.wtt.commonlib", "2.0.22")]
+    [BepInDependency("com.wtt.commonlib", "3.0.0")]
     public class BlackoutPlugin : BaseUnityPlugin
     {
         private const string LabsLocationId = "laboratory";
@@ -395,12 +395,20 @@ namespace Blackout
         {
             protected override MethodBase GetTargetMethod()
             {
-                return typeof(GetActionsClass).GetMethod("smethod_13",
-                    BindingFlags.Public | BindingFlags.Static);
+                // 4.1 collapsed GetActionsClass's 24 smethod_N statics into overloads of
+                // InteractionContextHelper.GetAvailableActions, told apart by their second
+                // parameter. Asking by name alone throws AmbiguousMatchException, so name the
+                // signature we want
+                return typeof(EFT.InteractionContextHelper).GetMethod(
+                    "GetAvailableActions",
+                    BindingFlags.Public | BindingFlags.Static,
+                    null,
+                    new[] { typeof(GamePlayerOwner), typeof(EFT.Interactive.KeycardDoor), typeof(bool) },
+                    null);
             }
 
             [SPT.Reflection.Patching.PatchPostfix]
-            private static void Postfix(ref ActionsReturnClass __result,
+            private static void Postfix(ref EFT.UI.AvailableInteractionState __result,
                 GamePlayerOwner owner, EFT.Interactive.KeycardDoor door, bool isProxy)
             {
                 var plugin = Instance;
@@ -411,11 +419,11 @@ namespace Blackout
                     return;
                 }
 
-                __result = new ActionsReturnClass
+                __result = new EFT.UI.AvailableInteractionState
                 {
-                    Actions = new List<ActionsTypesClass>
+                    Actions = new List<EFT.UI.InteractionAction>
                     {
-                        new ActionsTypesClass
+                        new EFT.UI.InteractionAction
                         {
                             Name = "Enter emergency code",
                             Action = () => plugin.OpenKeypad(door),
@@ -1876,7 +1884,7 @@ namespace Blackout
         // recon for the extraction lockdown: names, statuses and switch wiring of every exfil
         private bool DumpExfils()
         {
-            var controller = ExfiltrationControllerClass.Instance;
+            var controller = CommonAssets.Scripts.Game.ExfiltrationController.Instance;
             if (controller == null || controller.ExfiltrationPoints == null
                 || controller.ExfiltrationPoints.Length == 0)
             {
@@ -1906,7 +1914,7 @@ namespace Blackout
         // the event's lockdown: only the two gates remain, dead consoles, admin switch to come
         private bool ApplyExtractLockdown()
         {
-            var controller = ExfiltrationControllerClass.Instance;
+            var controller = CommonAssets.Scripts.Game.ExfiltrationController.Instance;
             if (controller == null || controller.ExfiltrationPoints == null
                 || controller.ExfiltrationPoints.Length == 0)
             {
@@ -1992,7 +2000,7 @@ namespace Blackout
         // admin office, one flip activates both gates
         private bool SpawnAdminSwitch()
         {
-            var controller = ExfiltrationControllerClass.Instance;
+            var controller = CommonAssets.Scripts.Game.ExfiltrationController.Instance;
             if (controller == null || controller.ExfiltrationPoints == null
                 || controller.ExfiltrationPoints.Length == 0)
             {
@@ -2340,7 +2348,7 @@ namespace Blackout
         private void ActivateGates()
         {
             UnblockGateRamps();
-            var controller = ExfiltrationControllerClass.Instance;
+            var controller = CommonAssets.Scripts.Game.ExfiltrationController.Instance;
             if (controller == null || controller.ExfiltrationPoints == null)
             {
                 return;
