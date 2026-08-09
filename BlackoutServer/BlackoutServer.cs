@@ -44,8 +44,11 @@ namespace BlackoutServer
     }
 
     // The event's Admin's key (db/CustomItems/blackout_key.json), created through WTT-CommonLib.
-    // The only item the mod adds. Runs post-DB so the clone donor already exists.
-    [Injectable(TypePriority = OnLoadOrder.PostLoad + 4)]
+    // The only item the mod adds. Runs at Preload, right after CommonLib registers its services
+    // (Preload + 0) - and critically BEFORE SaveCallbacks (600000), where profiles validate.
+    // The rc1 build had this at PostLoad, which created the key AFTER validation and marked any
+    // profile holding one invalid at server start.
+    [Injectable(TypePriority = OnLoadOrder.Preload + 4)]
     public class BlackoutCustomItems : IOnLoad
     {
         // the live event's Admin's key, real 1.0.6.5 item id - opens the system admin office
