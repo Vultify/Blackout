@@ -19,8 +19,6 @@ namespace Blackout
     {
         private const string LabsLocationId = "laboratory";
 
-        private const float RescanIntervalSec = 5f;
-
         // the live Admin's key id, created server-side by BlackoutServer
         private const string BlackoutKeyTemplateId = "6a33c17933cff6b88c08902e";
         private static readonly string[] LockedDoorIds =
@@ -62,6 +60,15 @@ namespace Blackout
         // no F12 options at all. Everything is fixed at the values tuned against the live event, and
         // turning the event off is the server's job - blackoutChance 0 in config.json and no raid rolls
         private const bool LabsOnly = true;   // Labs only, no other map
+
+        // The lamp kill is a port of live's own ControlledLampGroup.SetLightState(false) - see
+        // ApplyLightsOut. The scene files say live leaves ambient/specular alone, but a scene diff
+        // can't see what the game does to LevelSettings at runtime, and with both passes off the
+        // map reads murky-visible at distance instead of black - BSG's own description of the
+        // underground look is "ambient dropped to near zero". Both stay on, stacked on the new
+        // component coverage. Readonly rather than const so A/B flips don't trip CS0162
+        private static readonly bool LegacyAmbientKill = true;
+        private static readonly bool LegacySpecularDim = true;
         private const float DelaySeconds = 15f;
         private const float AmbientLevel = 0f;   // full black, like the live event
         private const float EmergencyIntensity = 1.2f;
@@ -104,7 +111,6 @@ namespace Blackout
         private bool _clockStarted;
         private bool _blackoutActive;
         private float _blackoutAt;
-        private float _nextRescan;
         private float _announcementAt;
         private bool _announcementPlayed;
         private AudioClip _powerDownClip;
@@ -151,55 +157,98 @@ namespace Blackout
             }
         }
 
-        private readonly Prof _profLightScene = new Prof("light scene disable");
-        private readonly Prof _profSpecular = new Prof("specular sweep");
+        private readonly Prof _profLightsOut = new Prof("lights-out pass");
         private readonly Prof _profEmissive = new Prof("emissive material sweep");
-        private readonly Prof _profLightScan = new Prof("light scan");
-        private readonly Prof _profLampScan = new Prof("lamp scan");
+        private readonly Prof _profSpecular = new Prof("specular sweep");
 
         private void LogPerfSummary()
         {
-            if (_profLightScene.Calls == 0 && _profEmissive.Calls == 0
-                && _profLightScan.Calls == 0 && _profLampScan.Calls == 0)
+            if (_profLightsOut.Calls == 0 && _profEmissive.Calls == 0 && _profSpecular.Calls == 0)
             {
                 return;
             }
             Logger.LogInfo(
-                $"[Blackout] perf totals: light scene {_profLightScene.TotalMs:0}ms x{_profLightScene.Calls}, "
-                + $"specular {_profSpecular.TotalMs:0}ms x{_profSpecular.Calls}, "
+                $"[Blackout] perf totals: lights-out {_profLightsOut.TotalMs:0}ms x{_profLightsOut.Calls}, "
                 + $"emissive {_profEmissive.TotalMs:0}ms x{_profEmissive.Calls}, "
-                + $"light scan {_profLightScan.TotalMs:0}ms x{_profLightScan.Calls}, "
-                + $"lamp scan {_profLampScan.TotalMs:0}ms x{_profLampScan.Calls}");
-            _profLightScene.Reset();
-            _profSpecular.Reset();
+                + $"specular {_profSpecular.TotalMs:0}ms x{_profSpecular.Calls}");
+            _profLightsOut.Reset();
             _profEmissive.Reset();
-            _profLightScan.Reset();
-            _profLampScan.Reset();
+            _profSpecular.Reset();
         }
 
-        private readonly List<LightState> _killedLights = new List<LightState>();
-        private readonly HashSet<Light> _trackedLights = new HashSet<Light>();
-        private readonly List<EFT.Interactive.LampController> _switchedLamps = new List<EFT.Interactive.LampController>();
-        private readonly HashSet<EFT.Interactive.LampController> _trackedLamps = new HashSet<EFT.Interactive.LampController>();
-        private readonly List<GameObject> _disabledLightObjects = new List<GameObject>();
-        // the solid props spared from the light-scene kill, and the parent chain that has to stay
-        // active for them to render - scratch sets, only meaningful during the sweep
-        private readonly HashSet<Transform> _lightSceneProps = new HashSet<Transform>();
-        private readonly HashSet<Transform> _lightSceneKeepPath = new HashSet<Transform>();
-
-        private LightmapData[] _originalLightmaps;
-        private float _originalAmbientIntensity;
-        private Color _originalAmbientLight;
-        private float _originalReflectionIntensity;
-
-        private struct LightState
+        // Everything the lights-out pass touched, for exact restore. All of it lives in the map's
+        // *_LIGHT scene, so these die with the raid - and since the pass mutates no shared
+        // materials (property blocks only), nothing can leak into the next raid either way
+        private struct LightRestore
         {
             public Light Light;
             public float Intensity;
+            public bool Enabled;
         }
 
+        private struct BaseLightRestore
+        {
+            public BaseLight Light;
+            public float Intensity;
+        }
+
+        private struct VolumetricRestore
+        {
+            public VolumetricLight Volumetric;
+            public bool Enabled;
+        }
+
+        private struct BlockedSlot
+        {
+            public Renderer Renderer;
+            public int Slot;
+        }
+
+        // ---- near-sight fog: the live dark raid's cant-see-far feel ----
+        // Labs ships no WeatherController (checked every scene), so the weather fog path is dead
+        // on this map. The real atmospheric lever is the MBOIT_Scattering compute effect riding
+        // every camera - including the optic camera, whose copy OpticComponentUpdater keeps in
+        // sync - which is what makes this scope-safe where the old RenderSettings fog x-rayed.
+        // 0 = off, which is where this settled: tested at 0.08 with forced outdoor scatter params
+        // and the effect held enabled all raid producing nothing visible - MBOIT scatters sun and
+        // sky light, and a lightless indoor map gives it nothing to scatter. Kept for reference;
+        // the near-sight answer is the ambient kill above, not atmospherics
+        private const float FogDensity = 0f;
+
+        private struct ScatterRestore
+        {
+            public MBOIT_Scattering Effect;
+            public bool Enabled;
+            public float Density;
+            public bool FromLevelSettings;
+            public float Mult;
+            public float Pow;
+            public float Bias;
+            public Color ScatterColor;
+        }
+
+        private int _fogReEnables;
+
+        private readonly List<ScatterRestore> _foggedCameras = new List<ScatterRestore>();
+        private readonly HashSet<MBOIT_Scattering> _foggedSet = new HashSet<MBOIT_Scattering>();
+        private int _fogCameraCount = -1;
+
+        private readonly List<CullingLightObject> _dimmedCullLights = new List<CullingLightObject>();
+        private readonly List<CullingAdvancedLightObject> _dimmedCullAdvLights = new List<CullingAdvancedLightObject>();
+        // wrappers that sat on inactive objects at the cut: their Awake fires on first activation
+        // and resets the multiplier, so each needs re-muting the frame it comes alive
+        private readonly List<CullingLightObject> _pendingCullLights = new List<CullingLightObject>();
+        private readonly List<CullingAdvancedLightObject> _pendingCullAdvLights = new List<CullingAdvancedLightObject>();
+        private readonly List<Renderer> _disabledZoneRenderers = new List<Renderer>();
+        private readonly List<LightRestore> _strayLights = new List<LightRestore>();
+        private readonly List<BaseLightRestore> _strayBaseLights = new List<BaseLightRestore>();
+        private readonly List<VolumetricRestore> _dimmedVolumetrics = new List<VolumetricRestore>();
+        private readonly List<MultiFlare.FlareLight> _dimmedFlares = new List<MultiFlare.FlareLight>();
+        private readonly List<BlockedSlot> _blockedEmissives = new List<BlockedSlot>();
+
         // the p0 emissive shaders drive brightness through power/visibility floats and the
-        // animated color pair - _EmissionColor alone is often already black
+        // animated color pair - _EmissionColor alone is often already black. Live's own group code
+        // only knows _EmissionVisibility/_EmissionColor; the extra props are 0.16.9's shader family
         private static readonly string[] EmissiveFloatProps = { "_EmissionPower", "_EmissionVisibility" };
         private static readonly string[] EmissiveColorProps = { "_EmissionColor", "_EmissiveColor", "_EmAnim1Color", "_EmAnim2Color" };
 
@@ -229,12 +278,8 @@ namespace Blackout
         private readonly Dictionary<Material, Vector4> _dimmedSpecular = new Dictionary<Material, Vector4>();
         private readonly List<Renderer> _specRenderers = new List<Renderer>(8300);
         private readonly List<Material> _specMaterials = new List<Material>(20);
-        private bool _lampScanRetired;
         private AudioMixerGroup _ambientMixerGroup;
         private bool _ambientMixerResolved;
-        private int _stableSweeps;
-        private int _stableLightScans;
-        private readonly HashSet<Light> _reportedRelights = new HashSet<Light>();
         private bool _isLabs;
         private readonly List<Light> _emergencyLights = new List<Light>();
 
@@ -316,6 +361,15 @@ namespace Blackout
             catch (Exception ex)
             {
                 Logger.LogError($"[Blackout] keypad patch failed, keycard doors stay vanilla: {ex.Message}");
+            }
+
+            try
+            {
+                new LampGroupStatePatch().Enable();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[Blackout] lamp group patch failed, motion-sensor lights will relight during the blackout: {ex.Message}");
             }
 
             TryLoadFikaBridge();
@@ -423,6 +477,31 @@ namespace Blackout
                         },
                     },
                 };
+            }
+        }
+
+        // Labs' motion-sensor lighting (gate searchlights, server room sets) drives lamp groups
+        // ON when a player walks into the trigger and OFF on the way out. The group writes light
+        // state and fixture emission directly from its recorded values, which bypasses the zeroed
+        // culling multipliers entirely. Live's dark scene deletes the switch/trigger objects
+        // outright; forcing the state low for the blackout's duration is the same statement
+        private class LampGroupStatePatch : SPT.Reflection.Patching.ModulePatch
+        {
+            protected override MethodBase GetTargetMethod()
+            {
+                return typeof(ControlledLampGroup).GetMethod(
+                    "SetLightState", BindingFlags.Public | BindingFlags.Instance);
+            }
+
+            [SPT.Reflection.Patching.PatchPrefix]
+            private static void Prefix(ref bool state)
+            {
+                var plugin = Instance;
+                if (plugin == null || !plugin._blackoutActive || !plugin._isLabs)
+                {
+                    return;
+                }
+                state = false;
             }
         }
 
@@ -857,22 +936,16 @@ namespace Blackout
                     _statusStarted = false;
                     _clockStarted = false;
                     _blackoutActive = false;
-                    _killedLights.Clear();
-                    _trackedLights.Clear();
-                    _switchedLamps.Clear();
-                    _trackedLamps.Clear();
-                    _disabledLightObjects.Clear();
-                    _stableSweeps = 0;
-                    _stableLightScans = 0;
-                    _reportedRelights.Clear();
-                    // materials are assets that outlive the raid - un-dim them or the next
-                    // raid (any map) inherits dead lamps
                     LogPerfSummary();
+                    // the scene is going down with everything the pass touched, but restore anyway
+                    // so a teardown that leaves it alive can't strand a dark map. The emissive and
+                    // specular passes mutate material assets, which DO outlive the raid - those two
+                    // restores are mandatory or the next raid inherits dead glass
+                    RestoreLightsOut();
                     RestoreEmissiveMaterials();
                     RestoreSpecular();
                     RestoreAmbient();
                     DestroyEmergencyLights();
-                    _originalLightmaps = null;
                     _subtitleText = null;
                 }
                 return;
@@ -1073,30 +1146,29 @@ namespace Blackout
             _blackoutActive = true;
             _announcementPlayed = false;
             _announcementAt = Time.time + AnnouncementDelay;
-
-            _originalAmbientIntensity = RenderSettings.ambientIntensity;
-            _originalAmbientLight = RenderSettings.ambientLight;
-            _originalReflectionIntensity = RenderSettings.reflectionIntensity;
-
-            // some maps carry baked lightmaps (Labs doesn't, confirmed 0 there)
-            _originalLightmaps = LightmapSettings.lightmaps;
-            LightmapSettings.lightmaps = new LightmapData[0];
-
-            _nextRescan = 0f;
-            _stableSweeps = 0;
-            _stableLightScans = 0;
             _isLabs = Singleton<GameWorld>.Instance?.LocationId == LabsLocationId;
 
-            var swLightScene = System.Diagnostics.Stopwatch.StartNew();
-            DisableLightScene();
-            _profLightScene.Add(swLightScene.Elapsed.TotalMilliseconds, Logger);
-            var swSpecular = System.Diagnostics.Stopwatch.StartNew();
-            DimSpecular();
-            _profSpecular.Add(swSpecular.Elapsed.TotalMilliseconds, Logger);
+            var swLightsOut = System.Diagnostics.Stopwatch.StartNew();
+            ApplyLightsOut();
+            _profLightsOut.Add(swLightsOut.Elapsed.TotalMilliseconds, Logger);
+            var swEmissive = System.Diagnostics.Stopwatch.StartNew();
+            DimEmissiveMaterials();
+            _profEmissive.Add(swEmissive.Elapsed.TotalMilliseconds, Logger);
+            if (LegacySpecularDim)
+            {
+                var swSpecular = System.Diagnostics.Stopwatch.StartNew();
+                DimSpecular();
+                _profSpecular.Add(swSpecular.Elapsed.TotalMilliseconds, Logger);
+            }
             SpawnEmergencyLights();
             EnforceBlackout();
             PlayPowerDownSound();
-            Logger.LogInfo($"[Blackout] Power cut: {_killedLights.Count} lights killed, {_switchedLamps.Count} lamp fixtures switched off, {_dimmedEmissives.Count} emissive materials dimmed, {_dimmedSpecular.Count} specular materials dimmed");
+            Logger.LogInfo($"[Blackout] Power cut: {_dimmedCullLights.Count}+{_dimmedCullAdvLights.Count} culled lamps zeroed "
+                + $"({_pendingCullLights.Count + _pendingCullAdvLights.Count} pending activation), "
+                + $"{_strayLights.Count} stray lights + {_strayBaseLights.Count} stray base lights off, "
+                + $"{_dimmedVolumetrics.Count} volumetrics off, {_dimmedFlares.Count} flares out, "
+                + $"{_disabledZoneRenderers.Count} fill zones off, "
+                + $"{_blockedEmissives.Count} emissive surfaces blacked, {_dimmedEmissives.Count} emissive materials dimmed");
         }
 
         private struct EmergencyLight
@@ -1247,19 +1319,38 @@ namespace Blackout
             settings.ApplySettings();
         }
 
-        // the live event's dark preset simply doesn't load the map's *_LIGHT scene, and switching
-        // its roots off is the runtime equivalent. The catch is that the scene isn't only lights:
-        // BSG parks the map's vehicles inside the per-area LAMPS groups, because headlights are
-        // light sources, so a blanket kill took the cars and their collision with it. Everything
-        // still goes off wholesale except the path down to those vehicles.
+        // A port of live's own blackout, decompiled from the 1.1.0 basement light switch. The
+        // event never disables a GameObject and never touches ambient - its ControlledLampGroup
+        // lists every light-ish component in the map's *_LIGHT scene and mutes each in place.
+        // Our scene data predates those authored lists, so this enumerates the same scene and
+        // applies the same mutes to everything in it:
         //
-        // Only the vehicles are spared, and they're found by structure, not by model name: every
-        // one carries a '*_Car_light_sourse' node and no lamp fixture does (Labs hangar: 33 of 48
-        // LAMPS children, Mercedes/Kamaz/Tacoma among them - a name list misses those). Testing
-        // for a Light component instead does not work here; the ceiling lamps, blue lights and TV
-        // panels are emissive meshes with no Light on them at all.
-        private void DisableLightScene()
+        //   CullingLightObject / CullingAdvancedLightObject -> IntensityMultiplier = 0. The
+        //   culling system recomputes its light every update as base x distanceFade x multiplier,
+        //   so the zero persists through every culling re-enable - no rescan loop - and the optic
+        //   path (scopes force distant lights on) multiplies by it too. The wrapped light is also
+        //   muted directly, like live does, because the multiplier only lands on the wrapper's
+        //   next staggered update tick.
+        //
+        //   Unwrapped lights -> disabled; unwrapped BaseLights -> intensity 0; VolumetricLight ->
+        //   disabled; FlareLight -> alpha 0; emissive surfaces -> per-renderer
+        //   MaterialPropertyBlock zeroing the emission props. Blocks override the shared material
+        //   without mutating the asset, so gear on the same shader is untouched and restore is
+        //   just dropping the block.
+        //
+        // Everything outside the light scene keeps its lights, exactly like live: keycard LEDs,
+        // door status lamps and muzzle flashes are in other scenes and never enter the pass, so
+        // the old name-fragment skip lists are gone with the scans that needed them. Vehicles and
+        // the other solid props parked in LAMPS groups stay visible because nothing is disabled -
+        // the whole ballistic-collider sparing walk this replaces existed to fix a problem live's
+        // method never has.
+        private void ApplyLightsOut()
         {
+            var wrappedLights = new HashSet<Light>();
+            var wrappedBase = new HashSet<BaseLight>();
+            var block = new MaterialPropertyBlock();
+            var materials = new List<Material>(8);
+
             for (var i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
             {
                 var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
@@ -1268,251 +1359,229 @@ namespace Blackout
                     continue;
                 }
 
-                // One pass to mark what survives: every solid prop, and the chain of parents holding
-                // it. A LAMPS group is not just lamps - the parking vehicles, the server room racks,
-                // vent modules, steam pipes and desk lamps all live in there too, because they glow.
-                // A *_BALLISTIC_* child is what separates them: 243 objects in this scene carry one
-                // and are real shootable geometry, the other 929 are ceiling lights and emissive
-                // planes with none. Their own lights still die - the light sweep and the emissive
-                // pass both run after this and neither cares whether we kept the object
-                var props = _lightSceneProps;
-                var keepPath = _lightSceneKeepPath;
-                props.Clear();
-                keepPath.Clear();
                 foreach (var root in scene.GetRootGameObjects())
                 {
-                    foreach (var tr in root.GetComponentsInChildren<Transform>(true))
+                    // The fake-GI fill volumes: box renderers that pour ambient into rooms with no
+                    // real lights at all - the server room is lit entirely by these, its LAMPS
+                    // fixtures are pure meshes. Live's blackout switches these renderers off with
+                    // the lamps; disabling the renderer (never the object) is the same statement
+                    if (root.name.IndexOf("Inverted_Shadow", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
-                        if (tr.name.IndexOf("_BALLISTIC", StringComparison.OrdinalIgnoreCase) < 0)
+                        foreach (var rend in root.GetComponentsInChildren<Renderer>(true))
                         {
-                            continue;
-                        }
-                        // the prop's own root, so its meshes and LODs survive with it: normally the
-                        // node hanging off a LAMPS group, since the ballistic mesh can sit several
-                        // levels down inside a car. 83 of them (table lamps) hang straight off an
-                        // area instead and never see a LAMPS parent, so fall back to the node
-                        // holding the ballistic mesh
-                        var propRoot = tr.parent;
-                        for (var node = tr; node != null; node = node.parent)
-                        {
-                            keepPath.Add(node);
-                            if (node.parent != null && node.parent.name == "LAMPS")
+                            if (rend.enabled)
                             {
-                                propRoot = node;
+                                rend.enabled = false;
+                                _disabledZoneRenderers.Add(rend);
                             }
                         }
-                        if (propRoot != null)
+                    }
+
+                    foreach (var cull in root.GetComponentsInChildren<CullingLightObject>(true))
+                    {
+                        cull.IntensityMultiplier = 0f;
+                        _dimmedCullLights.Add(cull);
+                        if (cull._light != null)
                         {
-                            props.Add(propRoot);
+                            wrappedLights.Add(cull._light);
+                            cull._light.enabled = false;
+                        }
+                        // inactive fixture (the gate searchlights): Awake will undo the mute when
+                        // the game activates it on approach - park it for the enforcement loop
+                        if (!cull.gameObject.activeInHierarchy)
+                        {
+                            _pendingCullLights.Add(cull);
+                        }
+                    }
+                    foreach (var cull in root.GetComponentsInChildren<CullingAdvancedLightObject>(true))
+                    {
+                        cull.IntensityMultiplier = 0f;
+                        _dimmedCullAdvLights.Add(cull);
+                        if (cull._light != null)
+                        {
+                            wrappedBase.Add(cull._light);
+                            cull._light.m_Intensity = 0f;
+                        }
+                        if (!cull.gameObject.activeInHierarchy)
+                        {
+                            _pendingCullAdvLights.Add(cull);
+                        }
+                    }
+                    foreach (var light in root.GetComponentsInChildren<Light>(true))
+                    {
+                        if (wrappedLights.Contains(light))
+                        {
+                            continue;
+                        }
+                        _strayLights.Add(new LightRestore { Light = light, Intensity = light.intensity, Enabled = light.enabled });
+                        light.enabled = false;
+                    }
+                    foreach (var baseLight in root.GetComponentsInChildren<BaseLight>(true))
+                    {
+                        if (wrappedBase.Contains(baseLight))
+                        {
+                            continue;
+                        }
+                        _strayBaseLights.Add(new BaseLightRestore { Light = baseLight, Intensity = baseLight.m_Intensity });
+                        baseLight.m_Intensity = 0f;
+                    }
+                    foreach (var vol in root.GetComponentsInChildren<VolumetricLight>(true))
+                    {
+                        _dimmedVolumetrics.Add(new VolumetricRestore { Volumetric = vol, Enabled = vol.enabled });
+                        vol.enabled = false;
+                    }
+                    foreach (var flare in root.GetComponentsInChildren<MultiFlare.FlareLight>(true))
+                    {
+                        flare.SetAlpha(0f);
+                        _dimmedFlares.Add(flare);
+                    }
+                    foreach (var rend in root.GetComponentsInChildren<MeshRenderer>(true))
+                    {
+                        rend.GetSharedMaterials(materials);
+                        for (var slot = 0; slot < materials.Count; slot++)
+                        {
+                            var mat = materials[slot];
+                            if (mat == null)
+                            {
+                                continue;
+                            }
+                            // SetPropertyBlock copies the values, so one scratch block serves every slot
+                            block.Clear();
+                            foreach (var prop in EmissiveFloatProps)
+                            {
+                                if (mat.HasProperty(prop))
+                                {
+                                    block.SetFloat(prop, 0f);
+                                }
+                            }
+                            foreach (var prop in EmissiveColorProps)
+                            {
+                                if (mat.HasProperty(prop))
+                                {
+                                    block.SetColor(prop, Color.black);
+                                }
+                            }
+                            if (block.isEmpty)
+                            {
+                                continue;
+                            }
+                            rend.SetPropertyBlock(block, slot);
+                            _blockedEmissives.Add(new BlockedSlot { Renderer = rend, Slot = slot });
                         }
                     }
                 }
-
-                var before = _disabledLightObjects.Count;
-                foreach (var root in scene.GetRootGameObjects())
-                {
-                    SweepLightScene(root);
-                }
-                // no props found (another map, or BSG renamed the meshes) means keepPath is empty
-                // and every root goes off - the old blanket behaviour, which is the safe direction
-                Logger.LogInfo($"[Blackout] Light scene '{scene.name}': {_disabledLightObjects.Count - before} objects off, {props.Count} solid props left standing");
             }
         }
 
-        private void SweepLightScene(GameObject go)
+        private void RestoreLightsOut()
         {
-            if (go == null || !go.activeSelf)
+            foreach (var state in _foggedCameras)
             {
-                return;
-            }
-            var tr = go.transform;
-            if (_lightSceneProps.Contains(tr))
-            {
-                return;
-            }
-            if (!_lightSceneKeepPath.Contains(tr))
-            {
-                go.SetActive(false);
-                _disabledLightObjects.Add(go);
-                return;
-            }
-            for (var i = 0; i < tr.childCount; i++)
-            {
-                SweepLightScene(tr.GetChild(i).gameObject);
-            }
-        }
-
-        private void EnforceBlackout()
-        {
-            KillAmbient();
-
-            // the F12 slider applies live; 0 switches them off without despawning
-            foreach (var emergency in _emergencyLights)
-            {
-                if (emergency != null && emergency.intensity != EmergencyIntensity)
+                if (state.Effect != null)
                 {
-                    emergency.intensity = EmergencyIntensity;
+                    state.Effect.enabled = state.Enabled;
+                    state.Effect.GlobalDensity = state.Density;
+                    state.Effect.FromLevelSettings = state.FromLevelSettings;
+                    state.Effect.ScatterDensityMultiplier = state.Mult;
+                    state.Effect.ScatterDensityPower = state.Pow;
+                    state.Effect.ScatterDensityBias = state.Bias;
+                    state.Effect.ScatterColorMultiplier = state.ScatterColor;
                 }
             }
-
-            // scene scans are pricey, discover new lights on an interval,
-            // but re-assert state on already-tracked ones every frame (ToD re-enables the sun)
-            if (Time.time >= _nextRescan)
+            _foggedCameras.Clear();
+            _foggedSet.Clear();
+            _fogCameraCount = -1;
+            if (_fogReEnables > 1)
             {
-                _nextRescan = Time.time + RescanIntervalSec;
-                if (_stableLightScans < 6)
+                Logger.LogInfo($"[Blackout] fog: effect was re-enabled {_fogReEnables} times over the raid");
+            }
+            _fogReEnables = 0;
+
+            _pendingCullLights.Clear();
+            _pendingCullAdvLights.Clear();
+            foreach (var rend in _disabledZoneRenderers)
+            {
+                if (rend != null)
                 {
-                    var swLightScan = System.Diagnostics.Stopwatch.StartNew();
-                    var lightsBefore = _killedLights.Count;
-                    foreach (var light in FindObjectsOfType<Light>())
-                    {
-                        if (light == null || _trackedLights.Contains(light))
-                        {
-                            continue;
-                        }
-                        // leave alone entirely: muzzle flashes and pooled effect lights
-                        // (gunfire/impacts/grenades) belong in the dark, and the red keycard
-                        // LEDs are the one thing the live dark scene keeps lit
-                        var lightName = light.name.ToLowerInvariant();
-                        if (lightName.Contains("muzzle") || lightName.Contains("lightofpool")
-                            || lightName.Contains("red_light") || lightName.Contains("blackout_emergency"))
-                        {
-                            continue;
-                        }
+                    rend.enabled = true;
+                }
+            }
+            _disabledZoneRenderers.Clear();
 
-                        // Labs door-status LEDs (flicker rigs, keycard state lamps) - the live
-                        // dark scene ships all of these enabled and script-driven, so the game
-                        // keeps animating them like the event does. Labs-gated: elsewhere these
-                        // name fragments could match real lamps
-                        if (_isLabs && (lightName.Contains("wrong_flicker") || lightName.Contains("cantescape")
-                            || lightName.Contains("everything") || lightName.Contains("interacting")
-                            || lightName.Contains("ready") || lightName.Contains("wait")))
-                        {
-                            continue;
-                        }
-                        _trackedLights.Add(light);
-
-                        // player/bot gear lights (flashlights, lasers) stay untouched - real
-                        // darkness needs no compensation, the game manages them
-                        if (IsGearLight(light))
-                        {
-                            continue;
-                        }
-                        // evidence line: does anything real ever show up after the first pass?
-                        if (_stableLightScans > 0 || _killedLights.Count > 0 && Time.time > _blackoutAt + RescanIntervalSec)
-                        {
-                            Logger.LogInfo($"[Blackout] LATE light discovered: '{light.name}' type={light.type} at t+{Time.time - _blackoutAt:0}s");
-                        }
-                        _killedLights.Add(new LightState { Light = light, Intensity = light.intensity });
-                    }
-                    _profLightScan.Add(swLightScan.Elapsed.TotalMilliseconds, Logger);
-                    _stableLightScans = _killedLights.Count == lightsBefore ? _stableLightScans + 1 : 0;
-                    if (_stableLightScans == 6)
+            // wrapped lights need no recorded values: multiplier back to 1 and the culling update
+            // recomputes real intensity and enabled state on its next tick
+            foreach (var cull in _dimmedCullLights)
+            {
+                if (cull != null)
+                {
+                    cull.IntensityMultiplier = 1f;
+                    if (cull._light != null)
                     {
-                        Logger.LogInfo($"[Blackout] Light discovery retired: {_killedLights.Count} scene lights held dark");
+                        cull._light.enabled = true;
                     }
                 }
-
-                // the lamp and material sweeps are whole-scene scans - once they stop finding
-                // anything new for a few passes, retire them (the light scan stays, lights
-                // keep appearing over a raid)
-                if (_stableSweeps < 3)
+            }
+            _dimmedCullLights.Clear();
+            foreach (var cull in _dimmedCullAdvLights)
+            {
+                if (cull != null)
                 {
-                    var swLampScan = System.Diagnostics.Stopwatch.StartNew();
-                    var lampsBefore = _trackedLamps.Count;
-                    var emissivesBefore = _dimmedEmissives.Count;
-                    var scannedLamps = false;
-
-                    // the game's own fixture switch: kills the lamp's emissive glass, flares
-                    // and lights together, exactly like shooting one out
-                    // FindObjectsOfType walks the whole scene whether or not anything matches,
-                    // and Labs has no LampControllers at all - 44ms a pass for nothing. Once a
-                    // scan comes back with none, stop scanning: fixtures never appear mid-raid.
-                    foreach (var lamp in _lampScanRetired
-                        ? System.Array.Empty<EFT.Interactive.LampController>()
-                        : FindObjectsOfType<EFT.Interactive.LampController>())
-                    {
-                        scannedLamps = true;
-                        if (lamp == null || _trackedLamps.Contains(lamp))
-                        {
-                            continue;
-                        }
-                        _trackedLamps.Add(lamp);
-                        var lampState = lamp.LampState;
-                        if (lampState == EFT.Interactive.Turnable.EState.Off
-                            || lampState == EFT.Interactive.Turnable.EState.Destroyed)
-                        {
-                            continue;
-                        }
-                        try
-                        {
-                            lamp.Switch(EFT.Interactive.Turnable.EState.Off);
-                            _switchedLamps.Add(lamp);
-                        }
-                        catch
-                        {
-                            // one broken lamp must not stop the sweep
-                        }
-                    }
-
-                    _profLampScan.Add(swLampScan.Elapsed.TotalMilliseconds, Logger);
-
-                    if (!_lampScanRetired && !scannedLamps && _trackedLamps.Count == 0)
-                    {
-                        _lampScanRetired = true;
-                        Logger.LogInfo("[Blackout] No lamp fixtures on this map, lamp sweep retired");
-                    }
-                    var swEmissive = System.Diagnostics.Stopwatch.StartNew();
-                    DimEmissiveMaterials();
-                    _profEmissive.Add(swEmissive.Elapsed.TotalMilliseconds, Logger);
-
-                    _stableSweeps = _trackedLamps.Count == lampsBefore && _dimmedEmissives.Count == emissivesBefore
-                        ? _stableSweeps + 1
-                        : 0;
+                    cull.IntensityMultiplier = 1f;
                 }
-
-                // weapons are pooled, a light discovered outside any player hierarchy can later
-                // end up in someone's hands, re-check and resurrect those as gear
-                for (var i = _killedLights.Count - 1; i >= 0; i--)
+            }
+            _dimmedCullAdvLights.Clear();
+            foreach (var state in _strayLights)
+            {
+                if (state.Light != null)
                 {
-                    var state = _killedLights[i];
-                    if (state.Light == null)
-                    {
-                        _killedLights.RemoveAt(i);
-                        continue;
-                    }
-                    if (!IsGearLight(state.Light))
-                    {
-                        continue;
-                    }
-                    _killedLights.RemoveAt(i);
-                    state.Light.enabled = true;
+                    state.Light.enabled = state.Enabled;
                     state.Light.intensity = state.Intensity;
                 }
             }
-
-            foreach (var state in _killedLights)
+            _strayLights.Clear();
+            foreach (var state in _strayBaseLights)
             {
-                if (state.Light != null && state.Light.enabled)
+                if (state.Light != null)
                 {
-                    // evidence line: does the game actually re-enable killed lights (the
-                    // "sun comes back" claim)? throttled to one report per offender
-                    if (_reportedRelights.Add(state.Light))
-                    {
-                        Logger.LogInfo($"[Blackout] RE-ENABLED by game: '{state.Light.name}' type={state.Light.type} at t+{Time.time - _blackoutAt:0}s");
-                    }
-                    state.Light.enabled = false;
+                    state.Light.m_Intensity = state.Intensity;
                 }
             }
-
-            RenderSettings.ambientIntensity = 0f;
-            RenderSettings.ambientLight = Color.black;
-            RenderSettings.reflectionIntensity = 0f;
+            _strayBaseLights.Clear();
+            foreach (var state in _dimmedVolumetrics)
+            {
+                if (state.Volumetric != null)
+                {
+                    state.Volumetric.enabled = state.Enabled;
+                }
+            }
+            _dimmedVolumetrics.Clear();
+            foreach (var flare in _dimmedFlares)
+            {
+                if (flare != null)
+                {
+                    flare.SetAlpha(1f);
+                }
+            }
+            _dimmedFlares.Clear();
+            foreach (var blocked in _blockedEmissives)
+            {
+                if (blocked.Renderer != null)
+                {
+                    // a null block drops the override and the shared material shows through again
+                    blocked.Renderer.SetPropertyBlock(null, blocked.Slot);
+                }
+            }
+            _blockedEmissives.Clear();
         }
 
-        // the glow that survives everything else: surfaces on EFT's emissive shader family
-        // (sky ceiling wallpaper, lamp glass atlases, LED panels) plus Standard-shader
-        // backlights - zero their shared materials' emission scene-wide
+        // The architectural glow lives OUTSIDE the light scene in our scene data: sky ceiling
+        // wallpaper, the fake mountain windows, videowalls, illuminated signs and kiosk
+        // backlights are authored into the area scenes. Live 1.1.0 collected all of those under
+        // the light scene's SOO_LOD0/Emissive node, which is how its lamp group reaches them -
+        // our build predates that reorganisation, so the scene-scoped pass above can't see them
+        // (confirmed the hard way: first live-exact build left every sky panel burning). Zero
+        // their shared materials' emission heap-wide instead, keyed by shader family - the same
+        // proven sweep the pre-rework builds shipped
         private void DimEmissiveMaterials()
         {
             foreach (var mat in Resources.FindObjectsOfTypeAll<Material>())
@@ -1587,6 +1656,165 @@ namespace Blackout
             _dimmedEmissives.Clear();
         }
 
+        // Per-frame during the blackout. The lights-out pass is one-shot and self-holding (the
+        // culling system enforces zeroed multipliers itself), so the live work left is the small
+        // pending list, the emergency floods and the optional legacy ambient takeover.
+        private void EnforceBlackout()
+        {
+            // fixtures that were inactive at the cut: the culling wrapper's Awake runs on first
+            // activation and resets both the multiplier and the light - the gate searchlights do
+            // exactly this when a player walks up. Re-mute each the frame it comes alive
+            for (var i = _pendingCullLights.Count - 1; i >= 0; i--)
+            {
+                var cull = _pendingCullLights[i];
+                if (cull == null)
+                {
+                    _pendingCullLights.RemoveAt(i);
+                    continue;
+                }
+                if (!cull.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+                cull.IntensityMultiplier = 0f;
+                if (cull._light != null)
+                {
+                    cull._light.enabled = false;
+                }
+                _pendingCullLights.RemoveAt(i);
+            }
+            for (var i = _pendingCullAdvLights.Count - 1; i >= 0; i--)
+            {
+                var cull = _pendingCullAdvLights[i];
+                if (cull == null)
+                {
+                    _pendingCullAdvLights.RemoveAt(i);
+                    continue;
+                }
+                if (!cull.gameObject.activeInHierarchy)
+                {
+                    continue;
+                }
+                cull.IntensityMultiplier = 0f;
+                if (cull._light != null)
+                {
+                    cull._light.m_Intensity = 0f;
+                }
+                _pendingCullAdvLights.RemoveAt(i);
+            }
+
+            // Backstop for any writer the lamp group patch doesn't cover: a muted light that got
+            // real intensity back is re-zeroed. Event-driven writers lose to a per-frame zero,
+            // and the culling system is left to manage 'enabled' on wrapped lights itself - with
+            // the multiplier at zero an enabled light still renders nothing
+            foreach (var cull in _dimmedCullLights)
+            {
+                if (cull != null && cull._light != null && cull._light.enabled && cull._light.intensity > 0f)
+                {
+                    cull._light.intensity = 0f;
+                }
+            }
+            foreach (var cull in _dimmedCullAdvLights)
+            {
+                if (cull != null && cull._light != null && cull._light.m_Intensity != 0f)
+                {
+                    cull._light.m_Intensity = 0f;
+                }
+            }
+            foreach (var state in _strayLights)
+            {
+                if (state.Light != null && state.Light.enabled)
+                {
+                    state.Light.enabled = false;
+                }
+            }
+            foreach (var state in _strayBaseLights)
+            {
+                if (state.Light != null && state.Light.m_Intensity != 0f)
+                {
+                    state.Light.m_Intensity = 0f;
+                }
+            }
+
+            // the fog: collect scattering effects whenever the camera set changes (the optic
+            // camera can appear mid-raid), then hold density every frame so nothing that syncs
+            // or resets the effect can win against it. First-contact log line per camera tells
+            // us what Labs actually runs if the effect turns out dead here
+            if (FogDensity > 0f)
+            {
+                if (Camera.allCamerasCount != _fogCameraCount)
+                {
+                    _fogCameraCount = Camera.allCamerasCount;
+                    foreach (var cam in Camera.allCameras)
+                    {
+                        var scatter = cam.GetComponent<MBOIT_Scattering>();
+                        if (scatter == null || _foggedSet.Contains(scatter))
+                        {
+                            continue;
+                        }
+                        _foggedSet.Add(scatter);
+                        _foggedCameras.Add(new ScatterRestore
+                        {
+                            Effect = scatter,
+                            Enabled = scatter.enabled,
+                            Density = scatter.GlobalDensity,
+                            FromLevelSettings = scatter.FromLevelSettings,
+                            Mult = scatter.ScatterDensityMultiplier,
+                            Pow = scatter.ScatterDensityPower,
+                            Bias = scatter.ScatterDensityBias,
+                            ScatterColor = scatter.ScatterColorMultiplier,
+                        });
+                        Logger.LogInfo($"[Blackout] fog: MBOIT on '{cam.name}' enabled={scatter.enabled} density={scatter.GlobalDensity:0.####} "
+                            + $"fromLevelSettings={scatter.FromLevelSettings} mult={scatter.ScatterDensityMultiplier:0.##} "
+                            + $"pow={scatter.ScatterDensityPower:0.##} bias={scatter.ScatterDensityBias:0.##} color={scatter.ScatterColorMultiplier}");
+                        scatter.FromLevelSettings = false;
+                        scatter.ScatterDensityMultiplier = 3.49f;
+                        scatter.ScatterDensityPower = 2.37f;
+                        scatter.ScatterDensityBias = 0.59f;
+                        scatter.ScatterColorMultiplier = new Color(1f, 1f, 1f, 0.4705f);
+                        scatter.enabled = true;
+                    }
+                }
+                foreach (var state in _foggedCameras)
+                {
+                    var fx = state.Effect;
+                    if (fx == null)
+                    {
+                        continue;
+                    }
+                    if (!fx.enabled)
+                    {
+                        fx.enabled = true;
+                        _fogReEnables++;
+                        if (_fogReEnables == 1)
+                        {
+                            Logger.LogInfo("[Blackout] fog: effect disabled itself, holding it on");
+                        }
+                    }
+                    if (fx.GlobalDensity != FogDensity)
+                    {
+                        fx.GlobalDensity = FogDensity;
+                    }
+                }
+            }
+
+            if (LegacyAmbientKill)
+            {
+                KillAmbient();
+                RenderSettings.ambientIntensity = 0f;
+                RenderSettings.ambientLight = Color.black;
+                RenderSettings.reflectionIntensity = 0f;
+            }
+
+            foreach (var emergency in _emergencyLights)
+            {
+                if (emergency != null && emergency.intensity != EmergencyIntensity)
+                {
+                    emergency.intensity = EmergencyIntensity;
+                }
+            }
+        }
+
         // One pass at the cut - the map's static geometry doesn't gain new surfaces mid-raid, and
         // unlike the light sweep there is nothing here for the game to re-assert.
         private void DimSpecular()
@@ -1640,27 +1868,6 @@ namespace Blackout
                 }
             }
             _dimmedSpecular.Clear();
-        }
-
-        private static bool IsGearLight(Light light)
-        {
-            if (light.name.ToLowerInvariant().Contains("muzzle"))
-            {
-                return false;
-            }
-            // the flashlight controller marks every tactical device light, pooled or not
-            if (light.GetComponentInParent<TacticalComboVisualController>() != null)
-            {
-                return true;
-            }
-            for (var t = light.transform; t != null; t = t.parent)
-            {
-                if (t.name.StartsWith("nvg_") || t.name.StartsWith("flashlight_"))
-                {
-                    return true;
-                }
-            }
-            return light.GetComponentInParent<Player>() != null;
         }
 
         private void OnGUI()
