@@ -3,17 +3,16 @@
 All notable changes to Blackout are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
-### Fixed
-- **Profiles holding the Admin's Key were marked invalid at server start** (4.0.0-rc1 only). The 4.1 port created the key after the server had already validated profiles, so a key sitting in your stash failed the "item exists" check and the whole profile was flagged. The key is created before validation now. No profiles were harmed - the flag clears on a clean start.
+
+## [4.0.0] - 2026-08-09
 ### Changed
+- **Ported to SPT 4.1.** This version needs SPT **4.1.x** and will not run on 4.0.13 - stay on 3.1.1 for that. Same event, same Fika sync (confirmed working on player-hosted and headless raids by the 4.0.0-rc1 testers).
+- Requires WTT-CommonLib **3.0.0 or newer** (the 4.1 line). The 2.0.x releases are for SPT 4.0 and will not work here.
 - **The darkness is now built the way the live game builds it.** The lamp kill is a port of the blackout recipe decompiled from live's own light switch: culling multipliers zeroed so the engine itself holds every lamp dark, BaseLights, volumetric shafts and lens flares muted (three whole systems the old pass never touched), and fixture glass blacked per renderer. Nothing in the light scene is disabled anymore, so nothing can go missing - the old vehicle-sparing machinery is gone because the problem it solved is gone.
 - **Labs' motion-sensor lighting stays down during the blackout.** The gate searchlights and server room sets used to snap on when a player walked into their trigger. Live's dark scene deletes those triggers outright; we force their state low for the event's duration instead.
 - The map reads properly void at distance now - ambient fully killed on top of the wider lamp coverage, same specular treatment as before.
-
-## [4.0.0] - 2026-08-08
-### Changed
-- **Ported to SPT 4.1.** This version needs SPT **4.1.x** and will not run on 4.0.13 - stay on 3.1.1 for that. Nothing about the event changed; it is the same mod against a moved API.
-- Requires WTT-CommonLib **3.0.0 or newer** (the 4.1 line). The 2.0.x releases are for SPT 4.0 and will not work here.
+### Fixed
+- **Profiles holding the Admin's Key were marked invalid at server start** (4.0.0-rc1 only). The 4.1 port created the key after the server had already validated profiles, so a key sitting in your stash failed the "item exists" check and the whole profile was flagged. The key is created before validation now. No profiles were harmed - the flag clears on a clean start.
 
 ## [3.1.1] - 2026-08-06
 ### Fixed
