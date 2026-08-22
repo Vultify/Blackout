@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <AssemblyName>BlackoutFika</AssemblyName>
+    <Authors>Vultify</Authors>
     <RootNamespace>BlackoutFika</RootNamespace>
     <Version>4.0.0</Version>
     <LangVersion>latest</LangVersion>

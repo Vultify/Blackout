@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <AssemblyName>Blackout</AssemblyName>
+    <Authors>Vultify</Authors>
     <RootNamespace>Blackout</RootNamespace>
     <Version>4.0.0</Version>
     <LangVersion>latest</LangVersion>

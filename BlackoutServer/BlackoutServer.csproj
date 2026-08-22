@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>BlackoutServer</AssemblyName>
+    <Authors>Vultify</Authors>
     <RootNamespace>BlackoutServer</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
