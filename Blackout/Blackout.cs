@@ -12,9 +12,10 @@ using UnityEngine.Audio;
 namespace Blackout
 {
     [BepInPlugin("com.vultify.blackout", "Blackout", "4.0.0")]
-    // the client half of WTT-CommonLib must be present or the Admin key resolves to nothing
-    // client-side. hard-depend so a missing half errors clearly
-    [BepInDependency("com.wtt.commonlib", "3.0.0")]
+    // WTT-ContentBackport ships the Admin's key as of 2.0.1 (same live item id we used to create
+    // ourselves), so its client half is what makes the key resolve client-side. Hard-depend so a
+    // missing install errors clearly instead of leaving a locked arsenal with no key in the world
+    [BepInDependency("com.wtt.contentbackport", "2.0.1")]
     public class BlackoutPlugin : BaseUnityPlugin
     {
         private const string LabsLocationId = "laboratory";

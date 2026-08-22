@@ -3,6 +3,10 @@
 All notable changes to Blackout are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+### Removed
+- **Blackout's own Admin's Key definition.** WTT-ContentBackport 2.0.1 ships the same key under the same live item id, and two definitions of one id collide at load - so the key is theirs now and Blackout only places it. Same item, same desk, same single use. One visible difference: their definition is not flea-sellable and not in the handbook, where ours was.
+### Changed
+- Requires **WTT-ContentBackport 2.0.1 or newer**, which brings WTT-CommonLib in with it. The direct CommonLib requirement is gone.
 
 ## [4.0.0] - 2026-08-09
 ### Changed

@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Threading;
 using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
@@ -38,68 +37,10 @@ namespace BlackoutServer
         public List<string>? Incompatibilities { get; init; } = new();
         public Dictionary<string, SemanticVersioning.Range>? ModDependencies { get; init; } = new()
         {
-            // creates the Admin's key. the only dependency left now the Black Division is gone
-            { "com.wtt.commonlib", new SemanticVersioning.Range(">=3.0.0") },
+            // ships the Admin's key (same live item id we used to create ourselves - 2.0.1 added it,
+            // and two definitions of one id collide at load). CommonLib comes in with it
+            { "com.wtt.contentbackport", new SemanticVersioning.Range(">=2.0.1") },
         };
-    }
-
-    // The event's Admin's key (db/CustomItems/blackout_key.json), created through WTT-CommonLib.
-    // The only item the mod adds. Runs at Preload, right after CommonLib registers its services
-    // (Preload + 0) - and critically BEFORE SaveCallbacks (600000), where profiles validate.
-    // The rc1 build had this at PostLoad, which created the key AFTER validation and marked any
-    // profile holding one invalid at server start.
-    [Injectable(TypePriority = OnLoadOrder.Preload + 4)]
-    public class BlackoutCustomItems : IOnLoad
-    {
-        // the live event's Admin's key, real 1.0.6.5 item id - opens the system admin office
-        private const string AdminKey = "6a33c17933cff6b88c08902e";
-
-        private readonly WTTServerCommonLib.WTTServerCommonLib _commonLib;
-        private readonly TemplateTable _templates;
-        private readonly ISptLogger<BlackoutCustomItems> _logger;
-
-        public BlackoutCustomItems(
-            WTTServerCommonLib.WTTServerCommonLib commonLib,
-            TemplateTable templates,
-            ISptLogger<BlackoutCustomItems> logger)
-        {
-            _commonLib = commonLib;
-            _templates = templates;
-            _logger = logger;
-        }
-
-        public async Task OnLoadAsync(CancellationToken cancellationToken)
-        {
-            try
-            {
-                await _commonLib.CustomItemServiceExtended.CreateCustomItems(Assembly.GetExecutingAssembly());
-
-                var items = _templates.Items;
-
-                // the Admin's key is the only item Blackout adds
-                var made = items.ContainsKey(new MongoId(AdminKey)) ? 1 : 0;
-
-                // single use; a wrong clone would silently inherit the donor's usage limit instead
-                items.TryGetValue(new MongoId(AdminKey), out var adminKey);
-                var keyUses = adminKey?.Properties?.MaximumNumberOfUsage;
-                var keySellable = adminKey?.Properties?.CanSellOnRagfair;
-                // prices live outside the item template, so check the tables they actually land in
-                var keyHandbook = _templates.Handbook.Items?
-                    .FirstOrDefault(i => i.Id == new MongoId(AdminKey))?.Price;
-                _templates.Prices.TryGetValue(new MongoId(AdminKey), out var keyFlea);
-
-                if (made != 1 || keyUses != 1 || keySellable != true
-                    || keyHandbook != 100000 || keyFlea != 157434)
-                {
-                    _logger.Error($"[Blackout] Admin key incomplete - created {made}/1, uses {keyUses} (want 1), " +
-                        $"sellable {keySellable}, handbook {keyHandbook} (want 100000), flea {keyFlea} (want 157434).");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.Error($"[Blackout] Admin key load failed: {ex}");
-            }
-        }
     }
 
     // Owns the per-raid coin flip. Rolled server-side and re-rolled after every raid, so the darkness,
