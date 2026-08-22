@@ -4,6 +4,16 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-08-22
+The SPT 4.0.13 line gets everything 4.1.0 got. Not on Forge - Forge carries the 4.1 line - this one ships through Discord for anyone still on 4.0.13.
+### Removed
+- **Blackout's own Admin's Key definition.** WTT-ContentBackport 1.1.5 ships the same key under the same live item id, and two definitions of one id collide at load - so the key is theirs now and Blackout only places it. Same item, same desk, same single use. One visible difference: their definition is not flea-sellable and not in the handbook, where ours was.
+### Changed
+- Requires **WTT-ContentBackport 1.1.5 or newer**, which brings WTT-CommonLib in with it. The direct CommonLib requirement is gone.
+- **The darkness is now built the way the live game builds it.** The lamp kill is a port of the blackout recipe decompiled from live's own light switch: culling multipliers zeroed so the engine itself holds every lamp dark, BaseLights, volumetric shafts and lens flares muted (three whole systems the old pass never touched), and fixture glass blacked per renderer. Nothing in the light scene is disabled anymore, so nothing can go missing - the old vehicle-sparing machinery is gone because the problem it solved is gone.
+- **Labs' motion-sensor lighting stays down during the blackout.** The gate searchlights and server room sets used to snap on when a player walked into their trigger. Live's dark scene deletes those triggers outright; we force their state low for the event's duration instead.
+- The map reads properly void at distance now - ambient fully killed on top of the wider lamp coverage, same specular treatment as before.
+
 ## [3.1.1] - 2026-08-06
 ### Fixed
 - **A Fika raid hosted by a headless client never went dark.** Fika elects the headless as host, and Blackout gave the host ownership of the moment the lights cut - but that moment is triggered by the host player moving, and a headless has no player. Every client sat waiting for a cut packet that could not come, so the raid ran as normal Labs. Everything else worked, which is why it looked like only the darkness was broken. On a headless-hosted raid the clients now run that clock themselves and the first one there sends the cut, which the headless relays to the rest - so the lights still go out for everyone at once. Player-hosted raids are unchanged.

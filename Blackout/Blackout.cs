@@ -11,10 +11,12 @@ using UnityEngine.Audio;
 
 namespace Blackout
 {
-    [BepInPlugin("com.vultify.blackout", "Blackout", "3.1.1")]
-    // the client half of WTT-CommonLib must be present or the Admin key resolves to nothing
-    // client-side. hard-depend so a missing half errors clearly
-    [BepInDependency("com.wtt.commonlib", "2.0.22")]
+    [BepInPlugin("com.vultify.blackout", "Blackout", "3.2.0")]
+    // WTT-ContentBackport ships the Admin's key as of 1.1.5 on the 4.0 line (same live item id we
+    // used to create ourselves), so its client half is what makes the key resolve client-side.
+    // Hard-depend so a missing install errors clearly instead of leaving a locked arsenal with no
+    // key in the world
+    [BepInDependency("com.wtt.contentbackport", "1.1.5")]
     public class BlackoutPlugin : BaseUnityPlugin
     {
         private const string LabsLocationId = "laboratory";
@@ -233,12 +235,27 @@ namespace Blackout
         private readonly HashSet<MBOIT_Scattering> _foggedSet = new HashSet<MBOIT_Scattering>();
         private int _fogCameraCount = -1;
 
-        private readonly List<CullingLightObject> _dimmedCullLights = new List<CullingLightObject>();
-        private readonly List<CullingAdvancedLightObject> _dimmedCullAdvLights = new List<CullingAdvancedLightObject>();
+        // the wrapper's light field is obfuscated on 4.0.13 (deobfuscated as _light on 4.1), but
+        // the light always sits on the wrapper's own GameObject - resolve it once at the cut and
+        // carry the pair, so the per-frame loops never pay for a lookup
+        private struct CullLight
+        {
+            public CullingLightObject Cull;
+            public Light Light;
+        }
+
+        private struct CullAdvLight
+        {
+            public CullingAdvancedLightObject Cull;
+            public BaseLight Light;
+        }
+
+        private readonly List<CullLight> _dimmedCullLights = new List<CullLight>();
+        private readonly List<CullAdvLight> _dimmedCullAdvLights = new List<CullAdvLight>();
         // wrappers that sat on inactive objects at the cut: their Awake fires on first activation
         // and resets the multiplier, so each needs re-muting the frame it comes alive
-        private readonly List<CullingLightObject> _pendingCullLights = new List<CullingLightObject>();
-        private readonly List<CullingAdvancedLightObject> _pendingCullAdvLights = new List<CullingAdvancedLightObject>();
+        private readonly List<CullLight> _pendingCullLights = new List<CullLight>();
+        private readonly List<CullAdvLight> _pendingCullAdvLights = new List<CullAdvLight>();
         private readonly List<Renderer> _disabledZoneRenderers = new List<Renderer>();
         private readonly List<LightRestore> _strayLights = new List<LightRestore>();
         private readonly List<BaseLightRestore> _strayBaseLights = new List<BaseLightRestore>();
@@ -1380,31 +1397,33 @@ namespace Blackout
                     foreach (var cull in root.GetComponentsInChildren<CullingLightObject>(true))
                     {
                         cull.IntensityMultiplier = 0f;
-                        _dimmedCullLights.Add(cull);
-                        if (cull._light != null)
+                        var pair = new CullLight { Cull = cull, Light = cull.GetComponent<Light>() };
+                        _dimmedCullLights.Add(pair);
+                        if (pair.Light != null)
                         {
-                            wrappedLights.Add(cull._light);
-                            cull._light.enabled = false;
+                            wrappedLights.Add(pair.Light);
+                            pair.Light.enabled = false;
                         }
                         // inactive fixture (the gate searchlights): Awake will undo the mute when
                         // the game activates it on approach - park it for the enforcement loop
                         if (!cull.gameObject.activeInHierarchy)
                         {
-                            _pendingCullLights.Add(cull);
+                            _pendingCullLights.Add(pair);
                         }
                     }
                     foreach (var cull in root.GetComponentsInChildren<CullingAdvancedLightObject>(true))
                     {
                         cull.IntensityMultiplier = 0f;
-                        _dimmedCullAdvLights.Add(cull);
-                        if (cull._light != null)
+                        var pair = new CullAdvLight { Cull = cull, Light = cull.GetComponent<BaseLight>() };
+                        _dimmedCullAdvLights.Add(pair);
+                        if (pair.Light != null)
                         {
-                            wrappedBase.Add(cull._light);
-                            cull._light.m_Intensity = 0f;
+                            wrappedBase.Add(pair.Light);
+                            pair.Light.m_Intensity = 0f;
                         }
                         if (!cull.gameObject.activeInHierarchy)
                         {
-                            _pendingCullAdvLights.Add(cull);
+                            _pendingCullAdvLights.Add(pair);
                         }
                     }
                     foreach (var light in root.GetComponentsInChildren<Light>(true))
@@ -1510,23 +1529,23 @@ namespace Blackout
 
             // wrapped lights need no recorded values: multiplier back to 1 and the culling update
             // recomputes real intensity and enabled state on its next tick
-            foreach (var cull in _dimmedCullLights)
+            foreach (var pair in _dimmedCullLights)
             {
-                if (cull != null)
+                if (pair.Cull != null)
                 {
-                    cull.IntensityMultiplier = 1f;
-                    if (cull._light != null)
+                    pair.Cull.IntensityMultiplier = 1f;
+                    if (pair.Light != null)
                     {
-                        cull._light.enabled = true;
+                        pair.Light.enabled = true;
                     }
                 }
             }
             _dimmedCullLights.Clear();
-            foreach (var cull in _dimmedCullAdvLights)
+            foreach (var pair in _dimmedCullAdvLights)
             {
-                if (cull != null)
+                if (pair.Cull != null)
                 {
-                    cull.IntensityMultiplier = 1f;
+                    pair.Cull.IntensityMultiplier = 1f;
                 }
             }
             _dimmedCullAdvLights.Clear();
@@ -1666,39 +1685,39 @@ namespace Blackout
             // exactly this when a player walks up. Re-mute each the frame it comes alive
             for (var i = _pendingCullLights.Count - 1; i >= 0; i--)
             {
-                var cull = _pendingCullLights[i];
-                if (cull == null)
+                var pair = _pendingCullLights[i];
+                if (pair.Cull == null)
                 {
                     _pendingCullLights.RemoveAt(i);
                     continue;
                 }
-                if (!cull.gameObject.activeInHierarchy)
+                if (!pair.Cull.gameObject.activeInHierarchy)
                 {
                     continue;
                 }
-                cull.IntensityMultiplier = 0f;
-                if (cull._light != null)
+                pair.Cull.IntensityMultiplier = 0f;
+                if (pair.Light != null)
                 {
-                    cull._light.enabled = false;
+                    pair.Light.enabled = false;
                 }
                 _pendingCullLights.RemoveAt(i);
             }
             for (var i = _pendingCullAdvLights.Count - 1; i >= 0; i--)
             {
-                var cull = _pendingCullAdvLights[i];
-                if (cull == null)
+                var pair = _pendingCullAdvLights[i];
+                if (pair.Cull == null)
                 {
                     _pendingCullAdvLights.RemoveAt(i);
                     continue;
                 }
-                if (!cull.gameObject.activeInHierarchy)
+                if (!pair.Cull.gameObject.activeInHierarchy)
                 {
                     continue;
                 }
-                cull.IntensityMultiplier = 0f;
-                if (cull._light != null)
+                pair.Cull.IntensityMultiplier = 0f;
+                if (pair.Light != null)
                 {
-                    cull._light.m_Intensity = 0f;
+                    pair.Light.m_Intensity = 0f;
                 }
                 _pendingCullAdvLights.RemoveAt(i);
             }
@@ -1707,18 +1726,18 @@ namespace Blackout
             // real intensity back is re-zeroed. Event-driven writers lose to a per-frame zero,
             // and the culling system is left to manage 'enabled' on wrapped lights itself - with
             // the multiplier at zero an enabled light still renders nothing
-            foreach (var cull in _dimmedCullLights)
+            foreach (var pair in _dimmedCullLights)
             {
-                if (cull != null && cull._light != null && cull._light.enabled && cull._light.intensity > 0f)
+                if (pair.Light != null && pair.Light.enabled && pair.Light.intensity > 0f)
                 {
-                    cull._light.intensity = 0f;
+                    pair.Light.intensity = 0f;
                 }
             }
-            foreach (var cull in _dimmedCullAdvLights)
+            foreach (var pair in _dimmedCullAdvLights)
             {
-                if (cull != null && cull._light != null && cull._light.m_Intensity != 0f)
+                if (pair.Light != null && pair.Light.m_Intensity != 0f)
                 {
-                    cull._light.m_Intensity = 0f;
+                    pair.Light.m_Intensity = 0f;
                 }
             }
             foreach (var state in _strayLights)

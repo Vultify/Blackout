@@ -12,7 +12,7 @@ Mirrors the live EFT "Blackout" event on The Lab. Seconds into the raid the gene
 
 ## The arsenal
 
-The **Admin's Key** spawns on the boss's desk in the manager's office on a blackout raid - single use, opens the arsenal, and the door can't be breached. The manager's office is itself locked, so it's the manager's office key first, then the arsenal.
+The **Admin's Key** spawns on the boss's desk in the manager's office on a blackout raid - single use, opens the arsenal, and the door can't be breached. The manager's office is itself locked, so it's the manager's office key first, then the arsenal. The key itself is WTT-ContentBackport's (the same live item, backported there as of 1.1.5) - Blackout puts it on the desk.
 
 The Wedge and his Black Division guards used to be part of this mod. They aren't any more - WTT's **Black Division** mod adds the Wedge itself now, so keeping our own meant two of him. Run that alongside Blackout if you want him holding the floors.
 
@@ -37,14 +37,14 @@ There used to be a separate **Blackout Fika** addon. It is discontinued. If you 
 ## Requirements
 
 - SPT 4.0.x
-- WTT-CommonLib **2.0.22 or newer** - both halves (WTT-ServerCommonLib and WTT-ClientCommonLib)
+- WTT-ContentBackport **1.1.5 or newer** - it ships the Admin's key, and brings WTT-CommonLib (both halves) in with it
 - WTT's Black Division mod optional - it brings the Wedge, which this mod no longer does
 - Fika optional - co-op raids sync themselves with no extra download, see [Co-op](#co-op)
 
 ## Structure
 
 - `Blackout/` - client BepInEx plugin (darkness, sounds, door locks, keypad)
-- `BlackoutServer/` - server mod (the raid roll and the Admin's Key)
+- `BlackoutServer/` - server mod (the raid roll and the key's desk spawn)
 - `BlackoutFika/` - the co-op bridge, shipped alongside the client plugin
 - `blackout_sounds.bundle` - the live event's audio, extracted and repacked
 
