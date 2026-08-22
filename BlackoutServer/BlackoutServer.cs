@@ -28,7 +28,7 @@ namespace BlackoutServer
         public bool HasPrepatcher { get; init; } = false;
 
         public SemanticVersioning.Version Version { get; init; }
-            = new SemanticVersioning.Version("4.0.0", false);
+            = new SemanticVersioning.Version("4.1.0", false);
 
         public SemanticVersioning.Range SptVersion { get; init; }
             = new SemanticVersioning.Range("~4.1.0", false);

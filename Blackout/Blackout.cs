@@ -11,7 +11,7 @@ using UnityEngine.Audio;
 
 namespace Blackout
 {
-    [BepInPlugin("com.vultify.blackout", "Blackout", "4.0.0")]
+    [BepInPlugin("com.vultify.blackout", "Blackout", "4.1.0")]
     // WTT-ContentBackport ships the Admin's key as of 2.0.1 (same live item id we used to create
     // ourselves), so its client half is what makes the key resolve client-side. Hard-depend so a
     // missing install errors clearly instead of leaving a locked arsenal with no key in the world
