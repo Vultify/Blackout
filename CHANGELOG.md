@@ -4,6 +4,10 @@ All notable changes to Blackout are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-08-22
+### Fixed
+- **The motion-sensor lights kept relighting on 4.0.13.** 3.2.0's patch for them asked the game for a method name that only exists on SPT 4.1, so it never attached - the gate searchlights and server room sets still snapped on when you walked into their trigger, exactly as before the fix, and the only sign was one line in the BepInEx log. It targets the 4.0.13 name now.
+
 ## [3.2.0] - 2026-08-22
 The SPT 4.0.13 line gets everything 4.1.0 got. Not on Forge - Forge carries the 4.1 line - this one ships through Discord for anyone still on 4.0.13.
 ### Removed

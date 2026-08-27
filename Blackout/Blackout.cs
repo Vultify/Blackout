@@ -11,7 +11,7 @@ using UnityEngine.Audio;
 
 namespace Blackout
 {
-    [BepInPlugin("com.vultify.blackout", "Blackout", "3.2.0")]
+    [BepInPlugin("com.vultify.blackout", "Blackout", "3.2.1")]
     // WTT-ContentBackport ships the Admin's key as of 1.1.5 on the 4.0 line (same live item id we
     // used to create ourselves), so its client half is what makes the key resolve client-side.
     // Hard-depend so a missing install errors clearly instead of leaving a locked arsenal with no
@@ -504,21 +504,41 @@ namespace Blackout
         // outright; forcing the state low for the blackout's duration is the same statement
         private class LampGroupStatePatch : SPT.Reflection.Patching.ModulePatch
         {
+            // 4.0.13 still ships this one obfuscated: SetLightState is method_8 there (4.1
+            // deobfuscated it, along with _currentLightState -> bool_0). Both names are tried so
+            // the same source builds either way, innermost method first - ToggleState and
+            // SetLightStateExternal both funnel into it, so patching it catches every path
+            private static readonly string[] StateMethodNames = { "method_8", "SetLightState" };
+
             protected override MethodBase GetTargetMethod()
             {
-                return typeof(ControlledLampGroup).GetMethod(
-                    "SetLightState", BindingFlags.Public | BindingFlags.Instance);
+                foreach (var name in StateMethodNames)
+                {
+                    var found = typeof(ControlledLampGroup).GetMethod(
+                        name,
+                        BindingFlags.Public | BindingFlags.Instance,
+                        null,
+                        new[] { typeof(bool) },
+                        null);
+                    if (found != null)
+                    {
+                        return found;
+                    }
+                }
+                return null;
             }
 
+            // by index, not by name - the parameter name is not something an obfuscated build
+            // guarantees, and getting it wrong fails at patch time rather than compile time
             [SPT.Reflection.Patching.PatchPrefix]
-            private static void Prefix(ref bool state)
+            private static void Prefix(ref bool __0)
             {
                 var plugin = Instance;
                 if (plugin == null || !plugin._blackoutActive || !plugin._isLabs)
                 {
                     return;
                 }
-                state = false;
+                __0 = false;
             }
         }
 
