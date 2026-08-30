@@ -28,7 +28,7 @@ namespace BlackoutServer
         public bool HasPrepatcher { get; init; } = false;
 
         public SemanticVersioning.Version Version { get; init; }
-            = new SemanticVersioning.Version("4.1.0", false);
+            = new SemanticVersioning.Version("4.1.1", false);
 
         // 4.1.1 floor, not 4.1.0 - we ship bundles and 4.1.0's bundle loading was broken, so
         // loading there means breaking in-raid instead of being refused at startup

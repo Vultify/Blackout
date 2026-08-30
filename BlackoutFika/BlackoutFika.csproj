@@ -5,7 +5,7 @@
     <AssemblyName>BlackoutFika</AssemblyName>
     <Authors>Vultify</Authors>
     <RootNamespace>BlackoutFika</RootNamespace>
-    <Version>4.1.0</Version>
+    <Version>4.1.1</Version>
     <LangVersion>latest</LangVersion>
     <!-- where to find the client's own build. build.bat overrides it, because it builds the client
          with -o bin\Release and the DLL lands flat instead of under the TFM folder. This default is

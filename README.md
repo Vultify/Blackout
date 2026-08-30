@@ -36,7 +36,7 @@ There used to be a separate **Blackout Fika** addon. It is discontinued. If you 
 
 ## Requirements
 
-- SPT 4.1.x
+- SPT 4.1.1 or newer (4.1.0 had broken bundle loading, so it's refused there)
 - WTT-ContentBackport **2.0.1 or newer** - it ships the Admin's key, and brings WTT-CommonLib (both halves) in with it
 - WTT's Black Division mod optional - it brings the Wedge, which this mod no longer does
 - Fika optional - co-op raids sync themselves with no extra download, see [Co-op](#co-op)

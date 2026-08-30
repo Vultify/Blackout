@@ -3,6 +3,8 @@
 All notable changes to Blackout are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+## [4.1.1] - 2026-08-30
 ### Changed
 - Now requires **SPT 4.1.1 or newer**. Bundle loading was broken in SPT 4.1.0, so there Blackout would load and then fail at its bundles mid-raid - now it is refused at startup with a message saying to update, which is the failure you can actually act on
 
